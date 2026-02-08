@@ -32,7 +32,6 @@ fund_research_db/
 │   ├── tb_fd_basic_info/
 │   │   ├── schema.sql         # 建表语句
 │   │   ├── insert.py          # 数据插入逻辑（计算表有此文件）
-│   │   ├── view.sql           # 视图映射（同步表有此文件）
 │   │   └── README.md          # 表说明文档
 │   │
 │   ├── tb_fd_perform_abs/

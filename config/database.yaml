@@ -1,0 +1,35 @@
+# 数据库连接配置
+# 用于基金研究数据库项目
+
+dev:
+  # Oracle 数据库配置
+  oracle:
+    host: backup.tytdb.db
+    port: 10086
+    service_name: tytdb
+    username: RDREADER
+    password: EbmSl9r8F9w834#EDC
+
+  # Doris 数据库配置
+  doris:
+    host: 10.189.18.47
+    port: 10096
+    database: tytdata
+    username: irdev
+    password: oCrxPb0osif31%TGB
+
+# 生产环境配置（预留）
+prod:
+  oracle:
+    host: master.tytdb.db
+    port: 10086
+    service_name: tytdb
+    username: IRDEV
+    password: dX5xOxqDw1r5%TGB
+
+  doris:
+    host: master.jgdoris.db
+    port: 10096
+    database: tytdata
+    username: irdev
+    password: rMs6qYjr7JLvb%TGB
