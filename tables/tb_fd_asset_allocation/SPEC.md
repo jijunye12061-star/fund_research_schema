@@ -1,10 +1,14 @@
 # tb_fd_asset_allocation - 基金资产配置表
 
 ## 基本信息
-
 - **主键**: (c_fd_code, c_report_date, c_style)
-- **更新频率**: 季度
-- **数据范围**: 基金季报资产配置明细
+- **表类型**: Oracle视图映射
+- **数据实效**: 实时同步
+
+## 数据来源
+- **Oracle表**: TYTFUND.FUND_IV_ASSETALLOCT
+- **映射方式**: CREATE VIEW直接映射
+- **过滤条件**: WHERE EISDEL = '0'
 
 ## 字段清单
 

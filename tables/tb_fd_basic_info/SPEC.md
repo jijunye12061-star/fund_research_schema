@@ -6,6 +6,20 @@
 - **更新频率**: 日度
 - **数据范围**: 全市场基金
 
+## 数据来源
+- **Oracle表**: 
+  - TYTFUND.FUND_JBXX（主表 - 基本信息）
+  - TYTFUND.FUND_BS_OFINFO（基金概况）
+  - TYTFUND.DIM_FD_INIT_CODE（初始代码）
+  - TYTFUND.FUND_BS_ATYPE（定开分类）
+  - TYTFUND.FUND_BS_CFINFO（持有期）
+- **更新逻辑**: 全量替换（UNIQUE KEY自动覆盖）
+
+## 数据质量
+- **特殊映射**: 519997→519996, 519995→519994, 370011→37001B
+- **默认规则**: REITs基金自动归类到007（另类投资基金）
+- **去重逻辑**: 初始代码按REMOVE_DT倒序取最新记录
+
 ## 字段清单
 
 | 字段名                   | 类型            | 注释       | 说明      |
