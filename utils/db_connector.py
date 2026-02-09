@@ -155,16 +155,16 @@ class DorisConnector:
             self.engine.dispose()
 
     @timer
-    def query(self, sql: str, chunksize: Optional[int] = None) -> pd.DataFrame:
-        """
-        执行查询
+    def query(self, sql: str, chunksize: Optional[int] = None, **params) -> pd.DataFrame:
+        """执行查询，支持绑定变量
 
         Args:
-            sql: SQL语句
+            sql: SQL语句，使用 :param_name 占位符
             chunksize: 分块大小，用于大数据量查询
+            **params: 绑定变量，如 start_date='2024-01-01'
         """
         with self.engine.connect() as conn:
-            result = pd.read_sql(text(sql), conn, chunksize=chunksize)
+            result = pd.read_sql(text(sql), conn, params=params, chunksize=chunksize)
             if chunksize:
                 result = pd.concat(result, ignore_index=True)
         return result
