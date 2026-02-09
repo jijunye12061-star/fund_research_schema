@@ -169,6 +169,41 @@ class DorisConnector:
                 result = pd.concat(result, ignore_index=True)
         return result
 
+    @timer
+    def query_batch(self, sql: str, code_list: List[str], batch_size: int = 400, **kwargs) -> pd.DataFrame:
+        """批量查询 - 自动分批处理大量代码列表
+
+        Args:
+            sql: SQL语句,代码列表占位符为 IN (:code_list)
+            code_list: 代码列表
+            batch_size: 每批数量,默认400
+            **kwargs: 其他绑定变量,如 start_date='2024-01-01'
+        """
+        if not code_list:
+            return pd.DataFrame()
+
+        all_results = []
+        batch_count = (len(code_list) + batch_size - 1) // batch_size
+
+        with self.engine.connect() as conn:
+            for i, start_idx in enumerate(range(0, len(code_list), batch_size)):
+                batch = code_list[start_idx:start_idx + batch_size]
+
+                # 动态生成绑定变量占位符
+                placeholders = ','.join([f':c{j}' for j in range(len(batch))])
+                batch_sql = sql.replace('IN (:code_list)', f'IN ({placeholders})')
+
+                # 构建参数字典
+                params = {f'c{j}': code for j, code in enumerate(batch)}
+                params.update(kwargs)
+
+                # 执行查询
+                batch_df = pd.read_sql(text(batch_sql), conn, params=params)
+                all_results.append(batch_df)
+                logger.debug(f"批次 {i + 1}/{batch_count} 完成")
+
+        return pd.concat(all_results, ignore_index=True) if all_results else pd.DataFrame()
+
     def execute(self, sql: str) -> None:
         """执行DDL/DML语句"""
         with self.engine.connect() as conn:
@@ -196,17 +231,21 @@ class DorisConnector:
 
 
 if __name__ == '__main__':
-    # 测试Oracle连接
-    with OracleConnector() as oracle:
-        test_sql = """
-            SELECT FCODE, SHORTNAME, ESTABDATE
-            FROM TYTFUND.FUND_JBXX
-            WHERE ROWNUM <= 10
-        """
-        test_result = oracle.query(test_sql)
-        print(f"Oracle查询: {len(test_result)}行")
+    # # 测试Oracle连接
+    # with OracleConnector() as oracle:
+    #     test_sql = """
+    #         SELECT FCODE, SHORTNAME, ESTABDATE
+    #         FROM TYTFUND.FUND_JBXX
+    #         WHERE ROWNUM <= 10
+    #     """
+    #     test_result = oracle.query(test_sql)
+    #     print(f"Oracle查询: {len(test_result)}行")
 
-    # # 测试Doris连接
-    # with DorisConnector() as doris:
-    #     result = doris.query("SELECT * FROM tb_fd_basic_info LIMIT 10")
-    #     print(f"Doris查询: {len(result)}行")
+    # 测试Doris连接
+    with DorisConnector() as doris:
+        test_sql = """
+        SELECT * FROM tb_fd_basic_info 
+            WHERE c_fd_code IN (:code_list)
+        """
+        result = doris.query_batch(test_sql, code_list=['000001', '000003'])
+        print(f"Doris查询: {len(result)}行")
