@@ -453,9 +453,9 @@ def run(calc_date: str):
 
     # 写入数据库
     with DorisConnector() as doris:
-        doris.upsert('tb_fd_tag_asset_eq', eq_results)
-        doris.upsert('tb_fd_tag_asset_fi', fi_results)
-        doris.upsert('tb_fd_tag_asset_mix', mix_results)
+        doris.insert('tb_fd_tag_asset_eq', eq_results)
+        doris.insert('tb_fd_tag_asset_fi', fi_results)
+        doris.insert('tb_fd_tag_asset_mix', mix_results)
 
     logger.info(
         f"完成标签生成 - 权益:{len(eq_results)}只 | "

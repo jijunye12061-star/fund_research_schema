@@ -225,10 +225,6 @@ class DorisConnector:
                 )
         logger.info(f"插入完成: {len(df)}行 → {table_name}")
 
-    def upsert(self, table_name: str, df: pd.DataFrame, batch_size: int = 8000) -> None:
-        """插入或更新数据 - UNIQUE KEY表自动覆盖"""
-        self.insert(table_name, df, batch_size)
-
 
 if __name__ == '__main__':
     # # 测试Oracle连接

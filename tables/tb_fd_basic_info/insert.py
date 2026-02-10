@@ -200,7 +200,7 @@ def run(calc_date: str = None):
 
     # 2. 写入Doris（全量更新）
     with DorisConnector() as doris:
-        doris.upsert('tb_fd_basic_info', df)
+        doris.insert('tb_fd_basic_info', df)
 
     logger.info(f"基金基础信息同步完成，共{len(df)}条记录")
     logger.info("=" * 60)

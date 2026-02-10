@@ -514,7 +514,7 @@ def run(calc_date: str):
 
     # 写入数据库
     with DorisConnector() as doris:
-        doris.upsert('tb_fd_category', results)
+        doris.insert('tb_fd_category', results)
 
     logger.info(f"完成 {len(results)} 只基金的分类更新")
     return results
