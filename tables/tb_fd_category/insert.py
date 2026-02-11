@@ -19,6 +19,9 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# ============================================================
+ENV = 'dev'  # 切换环境: 'dev' | 'prod'
+# ============================================================
 
 class FundCategory(Enum):
     """基金分类枚举"""
@@ -109,7 +112,7 @@ class FundClassifier:
                              c_class3_code
                       FROM tytdata.tb_fd_basic_info 
                       """
-                with DorisConnector() as doris:
+                with DorisConnector(ENV) as doris:
                   df = doris.query(sql)
 
                 # 统一处理日期转换
@@ -181,7 +184,7 @@ class FundClassifier:
             FROM ranked_data
             WHERE rn = 1
                   """
-            with DorisConnector() as doris:
+            with DorisConnector(ENV) as doris:
                 df = doris.query(sql, start_date=self.start_date,
                                  end_date=self.end_date)
             df['c_report_date'] = pd.to_datetime(df['c_report_date'], errors='coerce')
@@ -513,7 +516,7 @@ def run(calc_date: str):
     results['c_report_date'] = pd.to_datetime(report_date)
 
     # 写入数据库
-    with DorisConnector() as doris:
+    with DorisConnector(ENV) as doris:
         doris.insert('tb_fd_category', results)
 
     logger.info(f"完成 {len(results)} 只基金的分类更新")

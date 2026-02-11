@@ -8,15 +8,18 @@
 import sys
 from pathlib import Path
 import pandas as pd
+from utils.db_connector import OracleConnector, DorisConnector
+import logging
 
 # 添加项目路径
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from utils.db_connector import OracleConnector, DorisConnector
-import logging
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# ============================================================
+ENV = 'dev'  # 切换环境: 'dev' | 'prod'
+# ============================================================
 
 
 def _get_source_data() -> 'pd.DataFrame':
@@ -177,7 +180,7 @@ def _get_source_data() -> 'pd.DataFrame':
                               FROM TYTFUND.FUND_BS_CFINFO) e on a.c_fd_code = e.c_fd_code
           """
 
-    with OracleConnector() as oracle:
+    with OracleConnector(ENV) as oracle:
         df = oracle.query(sql)
 
     logger.info(f"从Oracle获取{len(df)}条基金基础信息")
@@ -199,7 +202,7 @@ def run(calc_date: str = None):
     logger.info("数据已获取完成")
 
     # 2. 写入Doris（全量更新）
-    with DorisConnector() as doris:
+    with DorisConnector(ENV) as doris:
         doris.insert('tb_fd_basic_info', df)
 
     logger.info(f"基金基础信息同步完成，共{len(df)}条记录")

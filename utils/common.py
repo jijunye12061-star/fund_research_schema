@@ -10,23 +10,26 @@ from datetime import datetime
 
 from utils.db_connector import OracleConnector, DorisConnector
 
+# ============================================================
+ENV = 'prod'  # 切换环境: 'dev' | 'prod'
+# ============================================================
+
 # ==================== 日期相关代码 ====================
 
 def get_trade_calendar(start_date: str, end_date: str) -> pd.DatetimeIndex:
     """获取交易日历，返回交易日集合"""
     sql = f"""
-    SELECT TRADE_DT
-    FROM TYTFUND.QT_TRADE_CALENDAR
-    WHERE TRADE_DT >= TO_DATE(:start_date, 'YYYY-MM-DD')
-      AND TRADE_DT <= TO_DATE(:end_date, 'YYYY-MM-DD')
-      AND IS_D = '1'
-    ORDER BY TRADE_DT
+    SELECT c_date
+    FROM tytdata.tb_trade_calendar
+    WHERE c_date >= :start_date
+      AND c_date <= :end_date
+      AND c_is_trade = 1
     """
 
-    with OracleConnector() as oracle:
-        df = oracle.query(sql, start_date=start_date, end_date=end_date)
+    with DorisConnector(ENV) as doris:
+        df = doris.query(sql, start_date=start_date, end_date=end_date)
 
-    return pd.DatetimeIndex(df['TRADE_DT'])
+    return pd.DatetimeIndex(df['c_date'])
 
 
 def find_nearest_trade_date(
@@ -103,7 +106,7 @@ def get_active_funds(calc_date: str) -> pd.DataFrame:
     ORDER BY c_fd_code
     """
 
-    with DorisConnector() as doris:
+    with DorisConnector('dev') as doris:
         df = doris.query(sql, calc_date=calc_date)
 
     return df
