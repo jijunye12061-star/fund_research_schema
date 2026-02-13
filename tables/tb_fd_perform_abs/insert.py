@@ -324,4 +324,4 @@ def run(calc_date: str):
 
 
 if __name__ == '__main__':
-    run('2026-01-06')
+    run('2026-01-07')
