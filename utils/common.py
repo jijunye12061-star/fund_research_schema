@@ -5,13 +5,13 @@
 @Project: fund_research_db
 """
 import pandas as pd
-from typing import Set, List, Optional
+from typing import Optional
 from datetime import datetime
 
-from utils.db_connector import OracleConnector, DorisConnector
+from utils.db_connector import DorisConnector
 
 # ============================================================
-ENV = 'prod'  # 切换环境: 'dev' | 'prod'
+ENV = 'dev'  # 切换环境: 'dev' | 'prod'
 # ============================================================
 
 # ==================== 日期相关代码 ====================
@@ -139,3 +139,8 @@ def safe_divide(
         return default
 
     return result
+
+
+if __name__ == '__main__':
+    test_calender = get_trade_calendar('2026-02-01', '2026-02-13')
+    test_result = get_active_funds('2025-01-31')

@@ -3,6 +3,7 @@
 计算基金在不同时间区间的绝对收益表现指标
 
 关键设计：
+- 指标分两层：基础指标(≥2条即算) / 风险指标(≥MIN_TRADE_DAYS才算)
 - 年化收益率：期初期末净值法，自然日（365）
 - 年化波动率：交易日收益率，sqrt(252) 标准年化
 - 数据来源：Doris tb_fd_nav_daily（纯交易日记录，无需 trade_dates 过滤）
@@ -29,7 +30,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ============================================================
-ENV = 'prod'  # 切换环境: 'dev' | 'prod'
+ENV = 'dev'  # 切换环境: 'dev' | 'prod'
 # ============================================================
 
 # ==================== 配置 ====================
@@ -58,7 +59,7 @@ PERIOD_CONFIGS = [
 RF_RATE = 0.02               # 无风险年化收益率
 NATURAL_DAYS_PER_YEAR = 365
 TRADING_DAYS_PER_YEAR = 252
-MIN_TRADE_DAYS = 21          # 区间内最少交易日数，不足则跳过
+MIN_TRADE_DAYS = 10          # 风险指标最少交易日数
 BATCH_SIZE = 100
 
 
@@ -73,18 +74,21 @@ class PeriodCalcInfo:
 def _get_nav_data(fund_codes: List[str], calc_date: str) -> pd.DataFrame:
     """从 Doris 批量获取净值数据（仅含交易日记录）"""
     sql = """
-    SELECT c_fd_code, c_trade_date, c_nav_adj, c_ret_1d
-    FROM tytdata.tb_fd_nav_daily
-    WHERE c_fd_code IN (:code_list)
-      AND c_trade_date <= :calc_date
-        AND c_is_trade = 1
+    SELECT a.c_fd_code, a.c_trade_date, a.c_nav_adj, a.c_nav_adj_pre
+    FROM tytdata.tb_fd_nav_daily a 
+        left join tytdata.tb_trade_calendar b
+        on a.c_trade_date = b.c_date
+    WHERE a.c_fd_code IN (:code_list)
+      AND a.c_trade_date <= :calc_date
+        AND b.c_is_trade = 1
     """
     with DorisConnector(ENV) as doris:
         df = doris.query_batch(sql, fund_codes, calc_date=calc_date)
 
     df['c_trade_date'] = pd.to_datetime(df['c_trade_date'])
     df['c_nav_adj'] = pd.to_numeric(df['c_nav_adj'], errors='coerce')
-    df['c_ret_1d'] = pd.to_numeric(df['c_ret_1d'], errors='coerce')
+    df['c_nav_adj_pre'] = pd.to_numeric(df['c_nav_adj_pre'], errors='coerce')
+    df['c_nav_adj_pre'] = df['c_nav_adj_pre'].fillna(df['c_nav_adj'])
     return df
 
 
@@ -107,7 +111,6 @@ def _get_valid_periods(estab_date: datetime, calc_date: datetime) -> List[Period
     valid = []
     for period in PERIOD_CONFIGS:
         start_date = _get_period_start(calc_date, period, estab_date)
-        # si 区间无条件有效；其余要求成立日 <= 区间起始
         if period.type == 'si' or estab_date <= start_date:
             valid.append(PeriodCalcInfo(config=period, start_date=start_date))
     return valid
@@ -116,20 +119,20 @@ def _get_valid_periods(estab_date: datetime, calc_date: datetime) -> List[Period
 # ==================== 指标计算 ====================
 
 def _ann_vol(returns: pd.Series) -> Optional[float]:
-    """年化波动率(%)，传入不同的 returns 切片即可得上行/下行/总体"""
+    """年化波动率(%)"""
     if len(returns) < 2:
         return None
     return returns.std() * np.sqrt(TRADING_DAYS_PER_YEAR) * 100
 
 
-def _calc_period_return(nav: pd.Series) -> float:
+def _calc_period_return(nav: pd.Series, nav_pre: pd.Series) -> float:
     """区间总收益率(%)"""
-    return (nav.iloc[-1] / nav.iloc[0] - 1) * 100
+    return (nav.iloc[-1] / nav_pre.iloc[0] - 1) * 100
 
 
-def _calc_ann_return(nav: pd.Series, natural_days: int) -> Optional[float]:
+def _calc_ann_return(nav: pd.Series, nav_pre: pd.Series, natural_days: int) -> Optional[float]:
     """年化收益率(%) - 期初期末净值法，自然日年化"""
-    total_ret = nav.iloc[-1] / nav.iloc[0] - 1
+    total_ret = nav.iloc[-1] / nav_pre.iloc[0] - 1
     if total_ret <= -1:
         return None
     return ((1 + total_ret) ** (NATURAL_DAYS_PER_YEAR / natural_days) - 1) * 100
@@ -151,13 +154,14 @@ def _calc_sharpe(returns: pd.Series) -> Optional[float]:
     )
 
 
-def _calc_calmar(nav: pd.Series, natural_days: int) -> Optional[float]:
-    """卡玛比率 = 年化收益率 / 最大回撤（期初期末净值法）"""
-    ann_ret = _calc_ann_return(nav, natural_days)
+def _calc_calmar(nav: pd.Series, nav_pre: pd.Series, natural_days: int) -> Optional[float]:
+    """卡玛比率 = 年化收益率 / 最大回撤"""
+    ann_ret = _calc_ann_return(nav, nav_pre, natural_days)
     mdd = _calc_max_drawdown(nav)
     if ann_ret is None:
         return None
     return safe_divide(ann_ret / 100, mdd / 100, default=None, min_denominator=1e-6, max_result=100)
+
 
 
 def _calc_sortino(returns: pd.Series) -> Optional[float]:
@@ -172,27 +176,41 @@ def _calc_sortino(returns: pd.Series) -> Optional[float]:
     )
 
 
-def _calc_metrics(nav: pd.Series, returns: pd.Series, natural_days: int) -> Dict:
-    """计算单区间所有指标，数据不足时返回空 dict"""
-    if len(returns) < MIN_TRADE_DAYS:
-        return {}
-
-    mdd = _calc_max_drawdown(nav)
-
+def _calc_basic_metrics(nav: pd.Series, nav_pre: pd.Series) -> Dict:
+    """基础指标 - 仅需 ≥2 条记录，无条件计算"""
     return {
-        'c_period_ret':    _calc_period_return(nav),
-        'c_ann_ret':       _calc_ann_return(nav, natural_days),
+        'c_period_ret':  _calc_period_return(nav, nav_pre),
+        'c_mdd':         _calc_max_drawdown(nav),
+        'c_break_ratio': (nav >= nav.cummax()).sum() / len(nav) * 100,
+    }
+
+
+def _calc_risk_metrics(nav: pd.Series, nav_pre: pd.Series, returns: pd.Series, natural_days: int) -> Dict:
+    """风险指标 - 需要 ≥ MIN_TRADE_DAYS 个交易日"""
+    return {
+        'c_ann_ret':       _calc_ann_return(nav, nav_pre, natural_days),
         'c_ann_vol':       _ann_vol(returns),
         'c_up_side_vol':   _ann_vol(returns[returns > 0]),
         'c_down_side_vol': _ann_vol(returns[returns < 0]),
-        'c_mdd':           mdd,
         'c_sharpe':        _calc_sharpe(returns),
-        'c_calmar':        _calc_calmar(nav, natural_days),
+        'c_calmar':        _calc_calmar(nav, nav_pre, natural_days),
         'c_sortino':       _calc_sortino(returns),
         'c_skewness':      returns.skew()     if len(returns) >= 3 else None,
         'c_kurtosis':      returns.kurtosis() if len(returns) >= 4 else None,
-        'c_break_ratio':   (nav >= nav.cummax()).sum() / len(nav) * 100,
     }
+
+
+def _calc_metrics(nav: pd.Series, nav_pre: pd.Series, returns: pd.Series, natural_days: int) -> Dict:
+    """计算单区间所有指标：基础指标无条件算，风险指标需满足最低交易日"""
+    if len(nav) < 2:
+        return {}
+
+    metrics = _calc_basic_metrics(nav, nav_pre)
+
+    if len(returns) >= MIN_TRADE_DAYS:
+        metrics.update(_calc_risk_metrics(nav, nav_pre, returns, natural_days))
+
+    return metrics
 
 
 # ==================== 单只基金处理 ====================
@@ -206,7 +224,6 @@ def _calc_fund_metrics(
     """计算单只基金所有有效区间的指标"""
     nav_df = nav_df.sort_values('c_trade_date')
 
-    # 计算日无净值则跳过（该日可能停牌或数据缺失）
     if calc_date not in nav_df['c_trade_date'].values:
         logger.warning(f"{fund_code} 在 {calc_date.date()} 无净值，跳过")
         return []
@@ -221,10 +238,11 @@ def _calc_fund_metrics(
             continue
 
         nav = period_df['c_nav_adj']
-        returns = period_df['c_ret_1d'].dropna()
+        nav_pre = period_df['c_nav_adj_pre']
+        returns = pd.Series(nav.values / nav_pre.values - 1, index=nav.index)
         natural_days = (period_df['c_trade_date'].iloc[-1] - period_df['c_trade_date'].iloc[0]).days
 
-        metrics = _calc_metrics(nav, returns, natural_days)
+        metrics = _calc_metrics(nav, nav_pre, returns, natural_days)
         if not metrics:
             continue
 
@@ -252,13 +270,13 @@ def _process_batch(fund_batch: pd.DataFrame, calc_date: datetime) -> pd.DataFram
     all_results = []
     for _, fund_info in fund_batch.iterrows():
         fund_code = fund_info['c_fd_code']
-        fund_nav = nav_df[nav_df['c_fd_code'] == fund_code]
+        fund_nav = nav_df.loc[nav_df['c_fd_code'] == fund_code, :]
         if fund_nav.empty:
             continue
 
         fund_results = _calc_fund_metrics(
             fund_code,
-            calc_date,
+            pd.to_datetime(calc_date),
             fund_nav,
             pd.to_datetime(fund_info['c_estabdate']),
         )
@@ -281,7 +299,7 @@ def run(calc_date: str):
 
     calc_date_dt = datetime.strptime(calc_date, '%Y-%m-%d')
 
-    # 非交易日跳过（取单日历即可，不需要完整日历）
+    # 非交易日跳过
     trade_dates = get_trade_calendar(calc_date, calc_date)
     if calc_date_dt not in trade_dates:
         logger.info(f"{calc_date} 非交易日，跳过")
@@ -297,12 +315,12 @@ def run(calc_date: str):
         logger.info(f"处理第 {batch_num}/{batch_count} 批...")
 
         batch_result = _process_batch(fund_list.iloc[i:i + BATCH_SIZE], calc_date_dt)
-    #     if not batch_result.empty:
-    #         with DorisConnector(ENV) as doris:
-    #             doris.insert('tb_fd_perform_abs', batch_result)
-    #
-    # logger.info(f"{calc_date} 基金业绩指标计算完成")
-    # logger.info("=" * 60)
+        if not batch_result.empty:
+            with DorisConnector(ENV) as doris:
+                doris.insert('tb_fd_perform_abs', batch_result)
+
+    logger.info(f"{calc_date} 基金业绩指标计算完成")
+    logger.info("=" * 60)
 
 
 if __name__ == '__main__':
