@@ -183,6 +183,7 @@ def _get_source_data() -> 'pd.DataFrame':
     with OracleConnector(ENV) as oracle:
         df = oracle.query(sql)
 
+    df.columns = df.columns.str.lower()
     logger.info(f"从Oracle获取{len(df)}条基金基础信息")
     return df
 

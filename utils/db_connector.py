@@ -5,10 +5,13 @@
 @Author: 季俊晔
 @Project: fund_research_db
 """
+import io
+import csv
 import yaml
 import time
 import logging
 import oracledb
+import requests
 import pandas as pd
 from pathlib import Path
 from typing import Optional, List
@@ -18,13 +21,15 @@ from sqlalchemy.engine import URL
 # 初始化Oracle客户端
 oracledb.init_oracle_client()
 
-# 配置日志
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
+# Doris Stream Load 地址（TODO: DBA申请后替换为F5负载均衡地址）
+DORIS_FE_HOST = "10.189.23.228"
+DORIS_HTTP_PORT = 8030
 
 def timer(func):
     """函数执行时间装饰器"""
@@ -130,6 +135,9 @@ class DorisConnector:
 
     def __init__(self, env: str = 'dev'):
         config = ConfigLoader().load(env)['doris']
+        self.database = config['database']
+        self.username = config['username']
+        self.password = config['password']
         self.url = URL.create(
             "mysql+pymysql",
             username=config['username'],
@@ -211,37 +219,81 @@ class DorisConnector:
             conn.commit()
 
     @timer
-    def insert(self, table_name: str, df: pd.DataFrame, batch_size: int = 8000) -> None:
-        """批量插入数据"""
-        with self.engine.connect() as conn:
-            with conn.begin():
-                df.to_sql(
-                    name=table_name,
-                    con=conn,
-                    if_exists='append',
-                    index=False,
-                    chunksize=batch_size,
-                    method='multi'
-                )
-        logger.info(f"插入完成: {len(df)}行 → {table_name}")
+    def insert(self, table_name: str, df: pd.DataFrame, batch_size: int = 50000) -> None:
+        """通过 Stream Load (JSON) 批量写入数据"""
+        if df.empty:
+            logger.warning(f"空DataFrame，跳过写入 {table_name}")
+            return
+
+        total = len(df)
+        columns = df.columns.tolist()
+
+        for start in range(0, total, batch_size):
+            batch_df = df.iloc[start:start + batch_size]
+            json_data = batch_df.to_json(
+                orient='records', date_format='iso', force_ascii=False
+            ).encode('utf-8')
+
+            _stream_load(
+                table=table_name,
+                data=json_data,
+                columns=columns,
+                database=self.database,
+                username=self.username,
+                password=self.password,
+            )
+            logger.info(f"批次 {start // batch_size + 1}: "
+                        f"{len(batch_df)}行 → {table_name} "
+                        f"({min(start + batch_size, total)}/{total})")
+
+
+def _stream_load(
+        table: str,
+        data: bytes,
+        columns: List[str],
+        database: str,
+        username: str,
+        password: str,
+) -> dict:
+    """执行 Doris Stream Load (JSON格式)"""
+    url = f"http://{DORIS_FE_HOST}:{DORIS_HTTP_PORT}/api/{database}/{table}/_stream_load"
+    headers = {
+        'Expect': '100-continue',
+        'format': 'json',
+        'strip_outer_array': 'true',
+        'columns': ','.join(columns),
+        'max_filter_ratio': '0',
+        'strict_mode': 'true',
+        'label': f"{table}_{int(time.time() * 1000)}_{id(data)}",
+    }
+    auth = (username, password)
+
+    # 第一步：请求FE，不跟随重定向
+    resp = requests.put(url, data=data, headers=headers, auth=auth,
+                        allow_redirects=False, timeout=30)
+
+    # 第二步：307重定向到BE
+    if resp.status_code == 307:
+        resp = requests.put(resp.headers['Location'], data=data,
+                            headers=headers, auth=auth, timeout=300)
+
+    result = resp.json()
+    if result.get('Status') == 'Success':
+        logger.info(f"Stream Load 成功: loaded={result.get('NumberLoadedRows', 0)}, "
+                    f"filtered={result.get('NumberFilteredRows', 0)}")
+        return result
+
+    error_msg = result.get('Message', str(result))
+    error_url = result.get('ErrorURL', '')
+    raise RuntimeError(f"Stream Load 失败: {error_msg}" +
+                       (f"\n错误详情: {error_url}" if error_url else ""))
 
 
 if __name__ == '__main__':
-    # # 测试Oracle连接
-    # with OracleConnector() as oracle:
-    #     test_sql = """
-    #         SELECT FCODE, SHORTNAME, ESTABDATE
-    #         FROM TYTFUND.FUND_JBXX
-    #         WHERE ROWNUM <= 10
-    #     """
-    #     test_result = oracle.query(test_sql)
-    #     print(f"Oracle查询: {len(test_result)}行")
-
-    # 测试Doris连接
     with DorisConnector() as doris:
         test_sql = """
         SELECT * FROM tb_fd_basic_info 
             WHERE c_fd_code IN (:code_list)
         """
-        result = doris.query_batch(test_sql, code_list=['000001', '000003'])
-        print(f"Doris查询: {len(result)}行")
+        test_result = doris.query_batch(test_sql, code_list=['000001', '000003'])
+        print(f"Doris查询: {len(test_result)}行")
