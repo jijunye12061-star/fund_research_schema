@@ -27,9 +27,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Doris Stream Load 地址（TODO: DBA申请后替换为F5负载均衡地址）
-DORIS_FE_HOST = "10.189.23.228"
-DORIS_HTTP_PORT = 8030
 
 def timer(func):
     """函数执行时间装饰器"""
@@ -138,6 +135,8 @@ class DorisConnector:
         self.database = config['database']
         self.username = config['username']
         self.password = config['password']
+        self.host = config['host']
+        self.http_port = config['http_port']
         self.url = URL.create(
             "mysql+pymysql",
             username=config['username'],
@@ -241,6 +240,8 @@ class DorisConnector:
                 database=self.database,
                 username=self.username,
                 password=self.password,
+                host=self.host,
+                http_port=self.http_port,
             )
             logger.info(f"批次 {start // batch_size + 1}: "
                         f"{len(batch_df)}行 → {table_name} "
@@ -254,9 +255,11 @@ def _stream_load(
         database: str,
         username: str,
         password: str,
+        host: str,
+        http_port: int,
 ) -> dict:
     """执行 Doris Stream Load (JSON格式)"""
-    url = f"http://{DORIS_FE_HOST}:{DORIS_HTTP_PORT}/api/{database}/{table}/_stream_load"
+    url = f"http://{host}:{http_port}/api/{database}/{table}/_stream_load"
     headers = {
         'Expect': '100-continue',
         'format': 'json',

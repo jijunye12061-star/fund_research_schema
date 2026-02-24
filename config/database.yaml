@@ -14,6 +14,7 @@ dev:
   doris:
     host: 10.189.18.47
     port: 10096
+    http_port: 8030
     database: tytdata
     username: irdev
     password: oCrxPb0osif31%TGB
