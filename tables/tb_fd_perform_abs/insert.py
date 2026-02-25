@@ -13,6 +13,25 @@
 """
 import sys
 from pathlib import Path
+
+def _setup_path():
+    """兼容本地和DS环境的路径适配"""
+    # 1. 本地开发：从 __file__ 向上找
+    for parent in Path(__file__).resolve().parents:
+        if (parent / 'utils' / 'db_connector.py').exists():
+            sys.path.insert(0, str(parent))
+            return
+
+    # 2. DS环境：资源目录固定路径
+    ds_resource = Path("dolphinscheduler/default/resources/jjy")
+    if (ds_resource / 'utils' / 'db_connector.py').exists():
+        sys.path.insert(0, str(ds_resource))
+        return
+
+    raise RuntimeError("找不到 utils 目录，请检查路径配置")
+
+_setup_path()
+
 import pandas as pd
 import numpy as np
 import logging
@@ -324,4 +343,9 @@ def run(calc_date: str):
 
 
 if __name__ == '__main__':
-    run('2026-01-07')
+    biz_date_str = '2026-02-24'
+    # biz_date_str = "${biz_date}"
+    # if len(biz_date_str) == 8:
+    #     biz_date_str = pd.to_datetime(biz_date_str, format='%Y%m%d').strftime('%Y-%m-%d')
+
+    run(biz_date_str)
