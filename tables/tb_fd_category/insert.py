@@ -6,6 +6,27 @@
 @time: 2025/11/17 14:32
 @description: 需要注意的是,资产配置表格更新后，要对报告期去重
 """
+import sys
+from pathlib import Path
+
+def _setup_path():
+    """兼容本地和DS环境的路径适配"""
+    # 1. 本地开发：从 __file__ 向上找
+    for parent in Path(__file__).resolve().parents:
+        if (parent / 'utils' / 'db_connector.py').exists():
+            sys.path.insert(0, str(parent))
+            return
+
+    # 2. DS环境：资源目录固定路径
+    ds_resource = Path("dolphinscheduler/default/resources/jjy")
+    if (ds_resource / 'utils' / 'db_connector.py').exists():
+        sys.path.insert(0, str(ds_resource))
+        return
+
+    raise RuntimeError("找不到 utils 目录，请检查路径配置")
+
+_setup_path()
+
 import pandas as pd
 from datetime import timedelta
 from typing import Dict, List, Optional

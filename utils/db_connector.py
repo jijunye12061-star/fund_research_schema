@@ -5,8 +5,6 @@
 @Author: 季俊晔
 @Project: fund_research_db
 """
-import io
-import csv
 import yaml
 import time
 import logging
@@ -51,11 +49,22 @@ class ConfigLoader:
     def load(self, env: str = 'dev') -> dict:
         """加载数据库配置"""
         if self._config is None:
-            config_path = Path(__file__).parent.parent / 'config' / 'database.yaml'
+            config_path = self._find_config()
             with open(config_path, 'r', encoding='utf-8') as f:
                 all_config = yaml.safe_load(f)
             self._config = all_config.get(env, {})
         return self._config
+
+    @staticmethod
+    def _find_config() -> Path:
+        current = Path(__file__).resolve()
+        # 依次向上搜索：utils/config, jjy/config, 再上一层/config
+        for parent in current.parents:
+            candidate = parent / 'config' / 'database.yaml'
+            if candidate.exists():
+                return candidate
+
+        raise FileNotFoundError("找不到 database.yaml，请设置环境变量 DB_CONFIG_PATH")
 
 
 class OracleConnector:
