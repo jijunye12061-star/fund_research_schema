@@ -134,6 +134,14 @@ if __name__ == '__main__':
 | 金额 | `DECIMAL(20,4)` |
 | 更新时间 | `DATETIME(6) DEFAULT CURRENT_TIMESTAMP(6)` |
 
+**Doris 建表规范**：
+
+- UNIQUE KEY 中 DATE 类型字段放在最前面，利用前缀索引加速日期范围查询
+- DISTRIBUTED BY HASH 桶数按数据量设定，避免小表过多桶：
+  - 单主键小表（如 basic_info）：1 桶
+  - 中等数据量表（如季度更新）：3 桶
+  - 按月分区的大表（如日频指标）：每分区 1 桶
+
 ---
 
 ## 六、代码规范

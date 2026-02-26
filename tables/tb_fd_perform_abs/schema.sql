@@ -1,29 +1,73 @@
-DROP TABLE IF EXISTS tb_fd_perform_abs;
-
-CREATE TABLE tb_fd_perform_abs (
-    c_fd_code        VARCHAR(20) NOT NULL COMMENT '基金代码',
-    c_trade_date     DATE NOT NULL COMMENT '交易日期',
-    c_period_code    VARCHAR(10) NOT NULL COMMENT '计算区间代码',
-    c_period_ret     DECIMAL(18,4) COMMENT '区间收益率(%)',
-    c_ann_ret        DECIMAL(18,4) COMMENT '年化收益率(%)',
-    c_ann_vol        DECIMAL(18,4) COMMENT '年化波动率(%)',
-    c_up_side_vol    DECIMAL(18,4) COMMENT '上行波动率(%)',
-    c_down_side_vol  DECIMAL(18,4) COMMENT '下行波动率(%)',
-    c_mdd            DECIMAL(12,4) COMMENT '最大回撤(%)',
-    c_sharpe         DECIMAL(18,4) COMMENT '夏普比率',
-    c_calmar         DECIMAL(18,4) COMMENT '卡尔玛比率',
-    c_sortino        DECIMAL(18,4) COMMENT '索提诺比率',
-    c_skewness       DECIMAL(18,4) COMMENT '偏度',
-    c_kurtosis       DECIMAL(18,4) COMMENT '峰度',
-    c_break_ratio    DECIMAL(12,4) COMMENT '净值创新高天数比例(%)',
-    c_updatetime     DATETIME(6) DEFAULT CURRENT_TIMESTAMP(6) COMMENT '更新时间'
-)
-ENGINE = OLAP
-UNIQUE KEY (c_fd_code, c_trade_date, c_period_code)
-COMMENT '基金业绩表现-绝对指标'
-DISTRIBUTED BY HASH(c_fd_code)
+CREATE TABLE tytdata.`tb_fd_perform_abs` (
+  `c_trade_date` date NOT NULL COMMENT '交易日期',
+  `c_fd_code` VARCHAR(20) NOT NULL COMMENT '基金代码',
+  `c_period_code` VARCHAR(10) NOT NULL COMMENT '计算区间代码',
+  `c_period_ret` DECIMAL(18, 4) NULL COMMENT '区间收益率(%)',
+  `c_ann_ret` DECIMAL(18, 4) NULL COMMENT '年化收益率(%)',
+  `c_ann_vol` DECIMAL(18, 4) NULL COMMENT '年化波动率(%)',
+  `c_up_side_vol` DECIMAL(18, 4) NULL COMMENT '上行波动率(%)',
+  `c_down_side_vol` DECIMAL(18, 4) NULL COMMENT '下行波动率(%)',
+  `c_mdd` DECIMAL(12, 4) NULL COMMENT '最大回撤(%)',
+  `c_sharpe` DECIMAL(18, 4) NULL COMMENT '夏普比率',
+  `c_calmar` DECIMAL(18, 4) NULL COMMENT '卡尔玛比率',
+  `c_sortino` DECIMAL(18, 4) NULL COMMENT '索提诺比率',
+  `c_skewness` DECIMAL(18, 4) NULL COMMENT '偏度',
+  `c_kurtosis` DECIMAL(18, 4) NULL COMMENT '峰度',
+  `c_break_ratio` DECIMAL(12, 4) NULL COMMENT '净值创新高天数比例(%)',
+  `c_updatetime` datetime(6) NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '更新时间'
+) ENGINE=OLAP
+UNIQUE KEY(`c_trade_date`, `c_fd_code`, `c_period_code`)
+COMMENT '基金业绩表现-绝对指标[机构研究]'
+PARTITION BY RANGE(`c_trade_date`)
+(PARTITION phis VALUES [('0000-01-01'), ('2025-01-01')),
+PARTITION p202501 VALUES [('2025-01-01'), ('2025-02-01')),
+PARTITION p202502 VALUES [('2025-02-01'), ('2025-03-01')),
+PARTITION p202503 VALUES [('2025-03-01'), ('2025-04-01')),
+PARTITION p202504 VALUES [('2025-04-01'), ('2025-05-01')),
+PARTITION p202505 VALUES [('2025-05-01'), ('2025-06-01')),
+PARTITION p202506 VALUES [('2025-06-01'), ('2025-07-01')),
+PARTITION p202507 VALUES [('2025-07-01'), ('2025-08-01')),
+PARTITION p202508 VALUES [('2025-08-01'), ('2025-09-01')),
+PARTITION p202509 VALUES [('2025-09-01'), ('2025-10-01')),
+PARTITION p202510 VALUES [('2025-10-01'), ('2025-11-01')),
+PARTITION p202511 VALUES [('2025-11-01'), ('2025-12-01')),
+PARTITION p202512 VALUES [('2025-12-01'), ('2026-01-01')),
+PARTITION p202601 VALUES [('2026-01-01'), ('2026-02-01')),
+PARTITION p202602 VALUES [('2026-02-01'), ('2026-03-01')),
+PARTITION p202603 VALUES [('2026-03-01'), ('2026-04-01')),
+PARTITION p202604 VALUES [('2026-04-01'), ('2026-05-01')),
+PARTITION p202605 VALUES [('2026-05-01'), ('2026-06-01')),
+PARTITION p202606 VALUES [('2026-06-01'), ('2026-07-01')),
+PARTITION p202607 VALUES [('2026-07-01'), ('2026-08-01')),
+PARTITION p202608 VALUES [('2026-08-01'), ('2026-09-01')),
+PARTITION p202609 VALUES [('2026-09-01'), ('2026-10-01')),
+PARTITION p202610 VALUES [('2026-10-01'), ('2026-11-01')),
+PARTITION p202611 VALUES [('2026-11-01'), ('2026-12-01')),
+PARTITION p202612 VALUES [('2026-12-01'), ('2027-01-01')),
+PARTITION p202701 VALUES [('2027-01-01'), ('2027-02-01')),
+PARTITION p202702 VALUES [('2027-02-01'), ('2027-03-01')))
+DISTRIBUTED BY HASH(`c_fd_code`) BUCKETS 1
 PROPERTIES (
-    "replication_allocation" = "tag.location.default: 3",
-    "storage_format" = "V2",
-    "enable_unique_key_merge_on_write" = "true"
+"replication_allocation" = "tag.location.default: 3",
+"is_being_synced" = "false",
+"dynamic_partition.enable" = "true",
+"dynamic_partition.time_unit" = "month",
+"dynamic_partition.time_zone" = "Asia/Shanghai",
+"dynamic_partition.start" = "-2147483648",
+"dynamic_partition.end" = "12",
+"dynamic_partition.prefix" = "p",
+"dynamic_partition.replication_allocation" = "tag.location.default: 3",
+"dynamic_partition.buckets" = "1",
+"dynamic_partition.create_history_partition" = "false",
+"dynamic_partition.history_partition_num" = "-1",
+"dynamic_partition.hot_partition_num" = "0",
+"dynamic_partition.reserved_history_periods" = "NULL",
+"dynamic_partition.storage_policy" = "",
+"dynamic_partition.start_day_of_month" = "1",
+"storage_medium" = "hdd",
+"storage_format" = "V2",
+"enable_unique_key_merge_on_write" = "true",
+"light_schema_change" = "true",
+"disable_auto_compaction" = "false",
+"enable_single_replica_compaction" = "false"
 );

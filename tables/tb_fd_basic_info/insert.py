@@ -11,8 +11,23 @@ import pandas as pd
 from utils.db_connector import OracleConnector, DorisConnector
 import logging
 
-# 添加项目路径
-sys.path.append(str(Path(__file__).parent.parent.parent))
+def _setup_path():
+    """兼容本地和DS环境的路径适配"""
+    # 1. 本地开发：从 __file__ 向上找
+    for parent in Path(__file__).resolve().parents:
+        if (parent / 'utils' / 'db_connector.py').exists():
+            sys.path.insert(0, str(parent))
+            return
+
+    # 2. DS环境：资源目录固定路径
+    ds_resource = Path("dolphinscheduler/default/resources/jjy")
+    if (ds_resource / 'utils' / 'db_connector.py').exists():
+        sys.path.insert(0, str(ds_resource))
+        return
+
+    raise RuntimeError("找不到 utils 目录，请检查路径配置")
+
+_setup_path()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -188,6 +203,7 @@ def _get_source_data() -> 'pd.DataFrame':
     with OracleConnector(ENV) as oracle:
         df = oracle.query(sql)
 
+    df.columns = df.columns.str.lower()
     logger.info(f"从Oracle获取{len(df)}条基金基础信息")
     return df
 
