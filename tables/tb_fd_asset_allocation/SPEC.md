@@ -1,11 +1,13 @@
 # tb_fd_asset_allocation - 基金资产配置表
 
 ## 基本信息
+
 - **主键**: (c_fd_code, c_report_date, c_style)
 - **表类型**: Oracle视图映射
 - **数据实效**: 实时同步
 
 ## 数据来源
+
 - **Oracle表**: TYTFUND.FUND_IV_ASSETALLOCT
 - **映射方式**: CREATE VIEW直接映射
 - **过滤条件**: WHERE EISDEL = '0'
@@ -25,18 +27,22 @@
 
 ### 股票投资
 
-| 字段名                   | 类型             | 注释         |
-|-----------------------|----------------|------------|
-| c_stk_total_mv        | DECIMAL(38,18) | 股票投资市值合计   |
-| c_stk_total_ratio     | DECIMAL(38,18) | 股票投资占净值比例  |
-| c_stk_index_mv        | DECIMAL(38,18) | 指数化投资市值    |
-| c_stk_index_ratio     | DECIMAL(38,18) | 指数化投资占净值比例 |
-| c_stk_active_mv       | DECIMAL(38,18) | 积极投资市值     |
-| c_stk_active_ratio    | DECIMAL(38,18) | 积极投资占净值比例  |
-| c_stk_equity_mv       | DECIMAL(18,2)  | 权益类投资市值    |
-| c_stk_equity_ratio    | DECIMAL(18,2)  | 权益类投资占净值比例 |
-| c_stk_preferred_mv    | DECIMAL(18,2)  | 优先股市值      |
-| c_stk_preferred_ratio | DECIMAL(18,2)  | 优先股占净值比例   |
+| 字段名                         | 类型             | 注释             |
+|-----------------------------|----------------|----------------|
+| c_stk_total_mv              | DECIMAL(38,18) | 股票投资市值合计       |
+| c_stk_total_ratio           | DECIMAL(38,18) | 股票投资占净值比例      |
+| c_stk_index_mv              | DECIMAL(38,18) | 指数化投资市值        |
+| c_stk_index_ratio           | DECIMAL(38,18) | 指数化投资占净值比例     |
+| c_stk_active_mv             | DECIMAL(38,18) | 积极投资市值         |
+| c_stk_active_ratio          | DECIMAL(38,18) | 积极投资占净值比例      |
+| c_stk_equity_mv             | DECIMAL(18,2)  | 权益类投资市值        |
+| c_stk_equity_ratio          | DECIMAL(18,2)  | 权益类投资占净值比例     |
+| c_stk_preferred_mv          | DECIMAL(18,2)  | 优先股市值          |
+| c_stk_preferred_ratio       | DECIMAL(18,2)  | 优先股占净值比例       |
+| c_stk_hk_connect_mv         | DECIMAL(18,2)  | 港股通市值          |
+| c_stk_hk_connect_ratio      | DECIMAL(18,2)  | 港股通占净值比例       |
+| c_stk_lend_securities_mv    | DECIMAL(18,2)  | 转融通证券出借业务市值    |
+| c_stk_lend_securities_ratio | DECIMAL(18,2)  | 转融通证券出借业务占净值比例 |
 
 ### 债券投资
 
