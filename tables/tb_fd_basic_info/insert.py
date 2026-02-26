@@ -169,16 +169,21 @@ def _get_source_data() -> 'pd.DataFrame':
               WHERE TYPECODE = '105016'
                 AND ISUSING = '1'
                 AND ENDDATE IS NULL) d ON a.c_fd_code = d.FUNDCODE
-                   LEFT JOIN (SELECT FUNDCODE AS c_fd_code,
+                   LEFT JOIN (SELECT cf.FUNDCODE AS c_fd_code,
                                      CASE
-                                         WHEN CLOSE_PERIOD_UNIT = '日' THEN ROUND(CLOSEPERIOD / 30.0, 2)
-                                         WHEN CLOSE_PERIOD_UNIT = '周' THEN ROUND(CLOSEPERIOD / 4.33, 2)
-                                         WHEN CLOSE_PERIOD_UNIT = '月' THEN CLOSEPERIOD
-                                         WHEN CLOSE_PERIOD_UNIT = '年' THEN CLOSEPERIOD * 12
-                                         ELSE CLOSEPERIOD
-                                         END  AS c_min_hold_period
-                              FROM TYTFUND.FUND_BS_CFINFO) e on a.c_fd_code = e.c_fd_code
-          """
+                                         WHEN cf.CLOSE_PERIOD_UNIT = '日' THEN ROUND(cf.CLOSEPERIOD / 30.0, 2)
+                                         WHEN cf.CLOSE_PERIOD_UNIT = '周' THEN ROUND(cf.CLOSEPERIOD / 4.33, 2)
+                                         WHEN cf.CLOSE_PERIOD_UNIT = '月' THEN cf.CLOSEPERIOD
+                                         WHEN cf.CLOSE_PERIOD_UNIT = '年' THEN cf.CLOSEPERIOD * 12
+                                         ELSE cf.CLOSEPERIOD
+                                         END     AS c_min_hold_period
+                              FROM TYTFUND.FUND_BS_CFINFO cf
+                              WHERE EXISTS (SELECT 1
+                                            FROM TYTFUND.FUND_BS_ATYPE at
+                                  WHERE at.FUNDCODE = cf.FUNDCODE
+                                      AND at.TYPECODE = '105046'
+                                      AND at.ISUSING = '1'
+                                      AND at.ENDDATE IS NULL)) e ON a.c_fd_code = e.c_fd_code"""
 
     with OracleConnector(ENV) as oracle:
         df = oracle.query(sql)
