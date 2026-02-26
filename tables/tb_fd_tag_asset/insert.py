@@ -5,8 +5,6 @@
 @file: tb_fd_tag_asset.py
 @time: 2025/12/1 17:16
 @description:
-"""
-"""
 基金资产配置标签生成模块
 
 生成三类基金的资产配置标签：
@@ -14,6 +12,26 @@
 - 固收+基金 (002)
 - 混合基金 (004)
 """
+import sys
+from pathlib import Path
+
+def _setup_path():
+    """兼容本地和DS环境的路径适配"""
+    # 1. 本地开发：从 __file__ 向上找
+    for parent in Path(__file__).resolve().parents:
+        if (parent / 'utils' / 'db_connector.py').exists():
+            sys.path.insert(0, str(parent))
+            return
+
+    # 2. DS环境：资源目录固定路径
+    ds_resource = Path("dolphinscheduler/default/resources/jjy")
+    if (ds_resource / 'utils' / 'db_connector.py').exists():
+        sys.path.insert(0, str(ds_resource))
+        return
+
+    raise RuntimeError("找不到 utils 目录，请检查路径配置")
+
+_setup_path()
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -27,6 +45,10 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# ============================================================
+ENV = 'dev'  # 切换环境: 'dev' | 'prod'
+# ============================================================
 
 # ============================================================
 # 配置类
@@ -59,8 +81,6 @@ class TagConfig:
 
 
 CONFIG = TagConfig()
-
-
 # ============================================================
 # 基类
 # ============================================================
@@ -112,7 +132,7 @@ class BaseFundTagAsset(ABC):
         WHERE c_type1_code = :fund_type
           AND c_report_date = :end_date
         """
-        with DorisConnector() as doris:
+        with DorisConnector(ENV) as doris:
             df = doris.query(sql, fund_type=self.FUND_TYPE_CODE,
                              end_date=self.end_date)
         return df['c_fd_code'].tolist() if not df.empty else []
@@ -160,7 +180,7 @@ class BaseFundTagAsset(ABC):
             FROM ranked_data
             WHERE rn = 1
             """
-            with DorisConnector() as doris:
+            with DorisConnector(ENV) as doris:
                 for report_dt in self.report_dates:
                     batch_df = doris.query_batch(sql, code_list=batch_codes, report_date=report_dt)
                     if not batch_df.empty:
@@ -170,7 +190,7 @@ class BaseFundTagAsset(ABC):
         if not result_dfs:
             return pd.DataFrame()
 
-        df = pd.concat(result_dfs, ignore_index=True)
+        df: pd.DataFrame = pd.concat(result_dfs, ignore_index=True)
 
         # 转换日期格式
         df['c_report_date'] = pd.to_datetime(df['c_report_date'])
@@ -202,6 +222,19 @@ class EquityFundTagAsset(BaseFundTagAsset):
 
     FUND_TYPE_CODE = "001"
     FUND_TYPE_NAME = "权益"
+
+    def _query_fund_codes(self) -> List[str]:
+        """查询基金代码列表，权益基金仅考虑主动型"""
+        sql = f"""
+        SELECT c_fd_code
+        FROM tytdata.tb_fd_category
+        WHERE c_type2_code = :fund_type
+          AND c_report_date = :end_date
+        """
+        with DorisConnector(ENV) as doris:
+            df = doris.query(sql, fund_type='001001',
+                             end_date=self.end_date)
+        return df['c_fd_code'].tolist() if not df.empty else []
 
     def generate(self) -> pd.DataFrame:
         """生成权益基金资产配置标签"""
@@ -399,36 +432,6 @@ class MixedFundTagAsset(BaseFundTagAsset):
 
 
 # ============================================================
-# 工厂函数
-# ============================================================
-def create_fund_tag_asset(fund_type: str, end_date: str) -> BaseFundTagAsset:
-    """
-    工厂函数：创建基金标签生成器
-
-    Args:
-        fund_type: 基金类型 ('eq'/'fi'/'mix' 或 '001'/'002'/'004')
-        end_date: 报告期
-
-    Returns:
-        对应的标签生成器实例
-    """
-    type_mapping = {
-        'eq': EquityFundTagAsset,
-        '001': EquityFundTagAsset,
-        'fi': FixedIncomePlusFundTagAsset,
-        '002': FixedIncomePlusFundTagAsset,
-        'mix': MixedFundTagAsset,
-        '004': MixedFundTagAsset,
-    }
-
-    cls = type_mapping.get(fund_type.lower())
-    if cls is None:
-        raise ValueError(f"不支持的基金类型: {fund_type}")
-
-    return cls(end_date)
-
-
-# ============================================================
 def run(calc_date: str):
     """基金资产配置标签生成 - 按季度定期执行
 
@@ -452,7 +455,7 @@ def run(calc_date: str):
     mix_results = mix_tagger.generate()
 
     # 写入数据库
-    with DorisConnector() as doris:
+    with DorisConnector(ENV) as doris:
         doris.insert('tb_fd_tag_asset_eq', eq_results)
         doris.insert('tb_fd_tag_asset_fi', fi_results)
         doris.insert('tb_fd_tag_asset_mix', mix_results)
@@ -465,4 +468,9 @@ def run(calc_date: str):
 
 
 if __name__ == "__main__":
-    run('2026-01-31')
+    biz_date_str = '2026-02-24'
+    # biz_date_str = "${biz_date}"
+    # if len(biz_date_str) == 8:
+    #     biz_date_str = pd.to_datetime(biz_date_str, format='%Y%m%d').strftime('%Y-%m-%d')
+
+    run(biz_date_str)
