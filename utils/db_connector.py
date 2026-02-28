@@ -100,7 +100,7 @@ class OracleConnector:
         return df
 
     @timer
-    def query_batch(self, sql: str, code_list: List[str], batch_size: int = 450) -> pd.DataFrame:
+    def query_batch(self, sql: str, code_list: List[str], batch_size: int = 450, **kwargs) -> pd.DataFrame:
         """
         批量查询 - 自动分批处理大量代码列表
 
@@ -125,6 +125,7 @@ class OracleConnector:
                     f"IN ({','.join([f':c{j}' for j in range(len(batch))])})"
                 )
                 bind_vars = {f'c{j}': code for j, code in enumerate(batch)}
+                bind_vars.update(kwargs)
 
                 cursor.execute(batch_sql, bind_vars)
                 all_results.extend(cursor.fetchall())
