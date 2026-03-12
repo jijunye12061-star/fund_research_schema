@@ -8,7 +8,7 @@ dev:
     port: 10086
     service_name: tytdb
     username: RDREADER
-    password: EbmSl9r8F9w834#EDC
+    password: xxx
 
   # Doris 数据库配置
   doris:
@@ -17,21 +17,12 @@ dev:
     http_port: 8030
     database: tytdata
     username: irdev
-    password: oCrxPb0osif31%TGB
+    password: xxx
 
 # 生产环境配置（预留）
 prod:
   oracle:
-    host: master.tytdb.db
-    port: 10086
-    http_port: 10086
-    service_name: tytdb
-    username: IRDEV
-    password: dX5xOxqDw1r5%TGB
+    xxx
 
   doris:
-    host: master.jgdoris.db
-    port: 10096
-    database: tytdata
-    username: irdev
-    password: rMs6qYjr7JLvb%TGB
+    xxx
