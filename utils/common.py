@@ -24,6 +24,7 @@ def get_trade_calendar(start_date: str, end_date: str) -> pd.DatetimeIndex:
     WHERE c_date >= :start_date
       AND c_date <= :end_date
       AND c_is_trade = 1
+    order by c_date
     """
 
     with DorisConnector(ENV) as doris:

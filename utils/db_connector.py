@@ -90,11 +90,11 @@ class OracleConnector:
             self.conn.close()
 
     @timer
-    def query(self, sql: str) -> pd.DataFrame:
-        """执行SQL查询"""
+    def query(self, sql: str, **params) -> pd.DataFrame:
+        """执行SQL查询，支持绑定变量"""
         with self.conn.cursor() as cursor:
             cursor.arraysize = 10000
-            cursor.execute(sql)
+            cursor.execute(sql, params or {})
             columns = [col[0] for col in cursor.description]
             df = pd.DataFrame(cursor.fetchall(), columns=columns)
         return df
