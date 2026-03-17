@@ -34,7 +34,7 @@ import pandas as pd
 from utils.db_connector import OracleConnector, DorisConnector
 from utils.common import get_trade_calendar
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
 # ============================================================
@@ -62,14 +62,12 @@ def _query_events(end_date: str) -> pd.DataFrame:
         OR PUBLISHCODE LIKE '029%')
       AND TYPE = 'I'
       AND OPDATE <= TO_DATE(:end_date, 'YYYY-MM-DD')
+        AND (EISDEL = 0 OR EISDEL IS NULL)
     """
     with OracleConnector(ENV) as oracle:
-        with oracle.conn.cursor() as cursor:
-            cursor.arraysize = 10000
-            cursor.execute(sql, {'end_date': end_date})
-            columns = [col[0].lower() for col in cursor.description]
-            df = pd.DataFrame(cursor.fetchall(), columns=columns)
+        df = oracle.query(sql, end_date=end_date)
 
+    df.columns = df.columns.str.lower()
     df['c_change_date'] = pd.to_datetime(df['c_change_date'])
     logger.info(f"查询到 {len(df)} 条行业事件")
     return df
@@ -151,7 +149,7 @@ def run(calc_date: str, events: pd.DataFrame = None) -> None:
         logger.debug(f"{calc_date} 非交易日, 跳过")
         return
 
-    logger.debug(f"开始处理 {calc_date}")
+    logger.info(f"开始处理 {calc_date}")
 
     stocks = _get_stock_list(calc_date)
     result = _get_snapshot(events, calc_date, stocks)
@@ -159,11 +157,11 @@ def run(calc_date: str, events: pd.DataFrame = None) -> None:
     with DorisConnector(ENV) as doris:
         doris.insert('tb_stk_industry', result)
 
-    logger.debug(f"完成 {calc_date}: {len(result)} 条")
+    logger.info(f"完成 {calc_date}: {len(result)} 条")
 
 
 if __name__ == '__main__':
-    main_events = _query_events('2026-03-17')
-    for dt in get_trade_calendar('2015-01-01', '2026-03-17'):
-        run(dt.strftime('%Y-%m-%d'), main_events)
-    # run('2026-03-16')
+    # main_events = _query_events('2026-03-17')
+    # for dt in get_trade_calendar('2015-01-01', '2026-03-17'):
+    #     run(dt.strftime('%Y-%m-%d'), main_events)
+    run('2026-03-16')

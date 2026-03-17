@@ -3,8 +3,8 @@
 ## 基本信息
 
 - **主键**: (c_trade_date, c_stk_code)
-- **更新频率**: 日度增量 / 支持区间补数
-- **数据范围**: 全A股(SH+SZ), 2005年至今
+- **更新频率**: 日度增量
+- **数据范围**: 全A股(含CDR), 2015-01-01至今
 - **分区方式**: 按月动态分区(含历史分区), 每分区1桶
 - **依赖表**: tb_stk_basic_info(股票列表), tb_trade_calendar(交易日历)
 
@@ -41,20 +41,11 @@
 通过 `tb_dict_params` 字典表关联获取行业名称:
 
 ```sql
--- c_param_type = 'CITIC_INDUSTRY' / 'SW_INDUSTRY'
+-- c_param_type = '中信行业分类' / '申万行业分类'
 -- c_param_code = 行业代码
 -- c_param_name = 行业名称
 -- c_parent_code = 上级行业代码
 ```
-
-## 数据量估算
-
-约 5000股 × 250天/年 × 20年 ≈ 2500万行, 按月分区约10万行/分区
-
-## 更新模式
-
-- **日增量**: `run(calc_date)` — 仅处理当天, 由DS每日调度
-- **区间补数**: `backfill(start_date, end_date)` — 批量补历史, 按月攒批写入
 
 ## 使用示例
 
@@ -71,7 +62,7 @@ SELECT a.c_stk_code,
        d.c_param_name          AS citic_l1_name
 FROM tytdata.tb_stk_industry a
          LEFT JOIN tytdata.tb_dict_params d
-                   ON d.c_param_type = 'CITIC_INDUSTRY'
+                   ON d.c_param_type = '中信行业分类'
                        AND d.c_param_code = LEFT(a.c_citic_code, 6)
 WHERE a.c_trade_date = '2025-12-31';
 
@@ -87,7 +78,7 @@ ORDER BY cnt DESC;
 SELECT c_trade_date, c_citic_code
 FROM (SELECT c_trade_date,
              c_citic_code,
-             LAG(c_citic_code) OVER (ORDER BY c_trade_date) AS prev
+             LAG(c_citic_code, 1, NULL) OVER (ORDER BY c_trade_date) AS prev
       FROM tytdata.tb_stk_industry
       WHERE c_stk_code = '000001') t
 WHERE c_citic_code != prev
@@ -101,8 +92,9 @@ FROM tytdata.tb_fd_portfolio_stk a
          JOIN tytdata.tb_stk_industry b
               ON a.c_stk_code = b.c_stk_code AND a.c_report_date = b.c_trade_date
          LEFT JOIN tytdata.tb_dict_params d
-                   ON d.c_param_type = 'CITIC_INDUSTRY' AND d.c_param_code = LEFT(b.c_citic_code, 6)
+                   ON d.c_param_type = '中信行业分类' AND d.c_param_code = LEFT(b.c_citic_code, 6)
 WHERE a.c_fd_code = '000001'
   AND a.c_report_date = '2025-06-30'
+AND a.c_style = '02'
 GROUP BY LEFT(b.c_citic_code, 6), d.c_param_name;
 ```
