@@ -8,7 +8,7 @@ CREATE TABLE tytdata.tb_dict_params (
     c_param_code  VARCHAR(50)  COMMENT '参数代码',
     c_param_name  VARCHAR(200) COMMENT '参数名称',
     c_parent_code VARCHAR(50)  COMMENT '父节点代码',
-    c_remark      VARCHAR(500) COMMENT '备注',
+    c_remark      VARCHAR(1000) COMMENT '备注',
     c_updatetime  DATETIME(6)  DEFAULT CURRENT_TIMESTAMP(6) COMMENT '更新时间'
 )
 ENGINE = OLAP
