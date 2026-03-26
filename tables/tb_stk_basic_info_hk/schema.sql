@@ -1,10 +1,11 @@
 -- 港股基本信息表
 -- 数据来源: Oracle TYTFUND.CDSY_SECUCODE
 -- 更新频率: 每日
+DROP TABLE IF EXISTS tb_stk_basic_info_hk;
 
 CREATE TABLE tytdata.`tb_stk_basic_info_hk` (
-  `c_stk_code` VARCHAR(20) NULL COMMENT '证券代码',
   `c_inner_code` VARCHAR(100) NULL COMMENT '证券内码',
+  `c_stk_code` VARCHAR(20) NULL COMMENT '证券代码',
   `c_company_code` VARCHAR(100) NULL COMMENT '公司代码',
   `c_stk_name` VARCHAR(200) NULL COMMENT '证券简称',
   `c_stk_type` VARCHAR(50) NULL COMMENT '证券类型',
@@ -14,9 +15,9 @@ CREATE TABLE tytdata.`tb_stk_basic_info_hk` (
   `c_list_status` VARCHAR(20) NULL COMMENT '上市状态',
   `c_updatetime` DATETIME(6) NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '更新时间'
 ) ENGINE=OLAP
-UNIQUE KEY(`c_stk_code`)
+UNIQUE KEY(`c_inner_code`)
 COMMENT '港股基本信息表[机构研究]'
-DISTRIBUTED BY HASH(`c_stk_code`) BUCKETS 1
+DISTRIBUTED BY HASH(`c_inner_code`) BUCKETS 1
 PROPERTIES (
 "replication_allocation" = "tag.location.default: 3",
 "storage_format" = "V2",
