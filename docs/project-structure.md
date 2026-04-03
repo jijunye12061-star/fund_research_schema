@@ -104,8 +104,3 @@ tables/tb_fd_perform_abs/
 （SQL查询示例）
 ```
 
-## 安全要求
-
-- `config/database.yaml` **绝不提交**，已在 `.gitignore` 中
-- 提交 `database.yaml.example` 作为模板
-- 历史中曾暴露凭据，建议轮换密码

@@ -24,6 +24,8 @@ env/
 
 # === Config & Secrets ===
 .env
+config/database.yaml
+CLAUDE.md
 
 # === Logs ===
 *.log

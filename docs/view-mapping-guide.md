@@ -15,7 +15,7 @@ AS
 SELECT
     {ORACLE_COL_1} as {doris_col_1}, {ORACLE_COL_2} as {doris_col_2}, ...
     FROM TYTFUND.{ORACLE_TABLE_NAME}
-WHERE EISDEL = 0;
+WHERE EISDEL = '0';
 ```
 备注：有些表可能`EISDEL`字段为Null，需注意
 
