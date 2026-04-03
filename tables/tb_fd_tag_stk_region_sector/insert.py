@@ -74,6 +74,7 @@ def _query_hk_data(doris: DorisConnector, fund_codes: list[str],
           AND c_report_date = :report_date
     )
     SELECT c_fd_code, c_report_date,
+           IFNULL(c_stk_total_ratio, 0) AS c_stk_total_ratio,
            CASE WHEN IFNULL(c_stk_total_ratio, 0) > 0
                 THEN IFNULL(c_stk_hk_connect_ratio, 0) / c_stk_total_ratio * 100
                 ELSE 0 END AS hk_ratio
@@ -195,7 +196,11 @@ def run(calc_date: str) -> None:
                     f"半年报窗口: {s_periods[0]}~{s_periods[-1]}")
 
         hk_df = _query_hk_data(doris, fund_codes, q_periods)
-        ind_df = _query_sector_data(doris, fund_codes, s_periods)
+        # 过滤近8期股票持仓全为0的基金（债基/无股票持仓）
+        stk_codes = set(hk_df.loc[hk_df['c_stk_total_ratio'] > 0, 'c_fd_code'])
+        hk_df = hk_df[hk_df['c_fd_code'].isin(stk_codes)]
+        logger.info(f"过滤后有股票持仓基金 {len(stk_codes)} 只（排除 {len(fund_codes)-len(stk_codes)} 只）")
+        ind_df = _query_sector_data(doris, list(stk_codes), s_periods)
 
         region_df = _calc_region(hk_df)
         sector_df = _calc_sector_features(_pivot_sector(ind_df))
