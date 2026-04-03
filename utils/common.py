@@ -7,6 +7,7 @@
 import pandas as pd
 from typing import Optional
 from datetime import datetime
+from enum import Enum
 
 from utils.db_connector import DorisConnector
 
@@ -111,6 +112,71 @@ def get_active_funds(calc_date: str) -> pd.DataFrame:
         df = doris.query(sql, calc_date=calc_date)
 
     return df
+
+# ==================== 报告期披露截止日调度 ====================
+
+
+class ReportFreq(Enum):
+    """基金报告披露频率
+
+    QUARTERLY   - 季报(15工作日): Q1≈0422 / Q2≈0722 / Q3≈1022 / Q4≈次年0122
+    SEMI_ANNUAL - 半年报/年报:   Q2→0829(60日) / Q4→次年0331(90日)
+    """
+    QUARTERLY = "quarterly"
+    SEMI_ANNUAL = "semi_annual"
+
+
+def get_quarterly_deadline(report_date: str) -> pd.Timestamp:
+    """季报披露截止日：报告期结束后第15个工作日"""
+    rd = pd.Timestamp(report_date)
+    start = (rd + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+    end = (rd + pd.Timedelta(days=30)).strftime('%Y-%m-%d')
+    trade_dates = get_trade_calendar(start, end)
+    return trade_dates[14]  # 0-indexed，第15个工作日
+
+
+def get_semiannual_deadline(report_date: str) -> pd.Timestamp:
+    """半年报/年报披露截止日：H1→60自然日，Annual→90自然日"""
+    rd = pd.Timestamp(report_date)
+    days = 60 if rd.month == 6 else 90
+    return rd + pd.Timedelta(days=days)
+
+
+def should_run(calc_date: str, freq: ReportFreq, window: int = 2) -> tuple[bool, str]:
+    """判断当前执行日期是否命中某个报告期的披露截止窗口
+
+    Args:
+        calc_date: DS传入的执行日期，格式 'YYYY-MM-DD'
+        freq:      数据源披露频率
+        window:    截止日后容错天数（截止日当天 + window天内均可触发）
+
+    Returns:
+        (should_run, report_date): 是否执行 + 对应报告期字符串
+
+    Examples:
+        should_run('2026-04-22', ReportFreq.QUARTERLY)   → (True,  '2026-03-31')
+        should_run('2026-04-20', ReportFreq.QUARTERLY)   → (False, '')
+        should_run('2026-08-29', ReportFreq.SEMI_ANNUAL) → (True,  '2026-06-30')
+    """
+    cd = pd.Timestamp(calc_date)
+    last_qe = get_last_quarter_end(calc_date)
+    recent_quarters = generate_report_dates(last_qe, 3)  # 最近3个季度末
+
+    for qe_str in reversed(recent_quarters):  # 从最近往前匹配
+        qe = pd.Timestamp(qe_str)
+
+        if freq == ReportFreq.QUARTERLY:
+            deadline = get_quarterly_deadline(qe_str)
+        else:  # SEMI_ANNUAL 只看 06-30 和 12-31
+            if qe.month not in (6, 12):
+                continue
+            deadline = get_semiannual_deadline(qe_str)
+
+        if deadline <= cd <= deadline + pd.Timedelta(days=window):
+            return True, qe_str
+
+    return False, ''
+
 
 # ==================== 其他通用函数 ====================
 
