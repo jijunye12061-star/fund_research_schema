@@ -258,8 +258,14 @@ def run(calc_date: str) -> None:
 if __name__ == '__main__':
     import sys
     if len(sys.argv) > 1:
-        raw = sys.argv[1]  # DS 格式 '20250630'
-        calc = f'{raw[:4]}-{raw[4:6]}-{raw[6:]}'
-        run(calc)
+        # DS 调度入口：传入 '20250630' 格式
+        raw = sys.argv[1]
+        run(f'{raw[:4]}-{raw[4:6]}-{raw[6:]}')
     else:
-        run('2024-12-31')
+        # ── 单期运行 ──────────────────────────────────────────
+        # run('2025-12-31')
+
+        # ── 历史补数：2016-03-31 起，季度频率 ─────────────────
+        hist_dates = generate_report_dates('2025-12-31', 40)
+        for dt in hist_dates:
+            run(dt)
