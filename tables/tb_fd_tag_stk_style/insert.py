@@ -170,12 +170,10 @@ def _calc_fund_scores(portfolio: pd.DataFrame, barra: pd.DataFrame,
 def _assign_size_vg_tags(result: pd.DataFrame, avg_50: float, avg_70: float,
                           avg_vg1: float, avg_vg2: float) -> None:
     """原地打市值标签和价值-成长标签"""
-    # SIZE tag
-    result['c_size_tag'] = np.where(
-        result['c_size_score'].isna(), np.nan,
-        np.where(result['c_size_score'] > avg_50, '大盘',
-        np.where(result['c_size_score'] > avg_70, '中盘', '小盘'))
-    )
+    # SIZE tag（先算字符串，再单独置空，避免 numpy 新版 float/str 混用报错）
+    result['c_size_tag'] = np.where(result['c_size_score'] > avg_50, '大盘',
+                           np.where(result['c_size_score'] > avg_70, '中盘', '小盘'))
+    result.loc[result['c_size_score'].isna(), 'c_size_tag'] = None
 
     # VG tag
     spread = result['c_value_score'] - result['c_growth_score']
@@ -185,7 +183,7 @@ def _assign_size_vg_tags(result: pd.DataFrame, avg_50: float, avg_70: float,
     result['c_vg_tag'] = np.select([is_value, is_growth, is_garp],
                                    ['价值', '成长', 'GARP'], default='均衡')
     both_nan = result['c_value_score'].isna() & result['c_growth_score'].isna()
-    result.loc[both_nan, 'c_vg_tag'] = np.nan
+    result.loc[both_nan, 'c_vg_tag'] = None
 
 
 def _assign_relative_tags(result: pd.DataFrame, hk_funds: set) -> None:
