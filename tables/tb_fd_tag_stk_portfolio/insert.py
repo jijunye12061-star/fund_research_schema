@@ -443,7 +443,7 @@ def _calc_turnover(doris: DorisConnector, fund_codes: list[str],
     """查 tb_fd_turnover 近4期半年报，计算换手率均值（前向填充到季报期）"""
     all_semi = [d for d in generate_report_dates(report_date, 16)
                 if d[5:] in ('06-30', '12-31')]
-    semi_date = all_semi[0]  # 最近半年报期（≤report_date）
+    semi_date = all_semi[-1]  # 最近半年报期（≤report_date）
     semi_4 = [d for d in generate_report_dates(semi_date, 8)
               if d[5:] in ('06-30', '12-31')][:4]
 
@@ -475,9 +475,9 @@ def _assign_turnover_tag(result: pd.DataFrame, fund_types: pd.DataFrame) -> None
 # ==================== 抱团度 ====================
 
 def _query_crowd_scores(doris: DorisConnector, semi_date: str) -> pd.DataFrame:
-    """查询个股全市场抱团度得分"""
+    """查询个股抱团度得分（全市场+各公司）"""
     sql = """
-    SELECT c_stk_code, c_crowd_score_mkt
+    SELECT c_company_code, c_stk_code, c_crowd_score
     FROM tytdata.tb_stk_crowding_score
     WHERE c_report_date = :d
     """
@@ -506,47 +506,45 @@ def _get_company_map(doris: DorisConnector, fund_codes: list[str]) -> pd.DataFra
     SELECT c_fd_code, c_company_code
     FROM tytdata.tb_fd_basic_info
     WHERE c_fd_code IN (:code_list)
+      AND c_company_code IS NOT NULL
     """
     return doris.query_batch(sql, code_list=fund_codes)
 
 
-def _calc_crowd_mkt(holdings: pd.DataFrame, crowd_scores: pd.DataFrame) -> pd.DataFrame:
-    """全市场抱团度 = 持仓市值加权的 crowd_score_mkt 均值"""
-    df = holdings.merge(crowd_scores, on='c_stk_code', how='inner')
-    df['wt_score'] = df['c_hold_value'] * df['c_crowd_score_mkt']
+def _calc_crowd_mkt(holdings: pd.DataFrame, crowd_df: pd.DataFrame) -> pd.DataFrame:
+    """全市场抱团度 = 持仓市值加权的 crowd_score 均值（MKT口径）"""
+    mkt = crowd_df[crowd_df['c_company_code'] == 'MKT'][['c_stk_code', 'c_crowd_score']]
+    df = holdings.merge(mkt, on='c_stk_code', how='inner')
+    df['wt_score'] = df['c_hold_value'] * df['c_crowd_score']
     g = df.groupby('c_fd_code').agg(wt=('wt_score', 'sum'), w=('c_hold_value', 'sum'))
-    result = (g['wt'] / g['w']).round(4).rename('c_crowd_score').reset_index()
-    return result
+    return (g['wt'] / g['w']).round(4).rename('c_crowd_score').reset_index()
 
 
-def _calc_crowd_internal(holdings: pd.DataFrame, company_map: pd.DataFrame) -> pd.DataFrame:
-    """同公司抱团度 = 公司内持仓市值百分位排名加权均值"""
+def _calc_crowd_internal(holdings: pd.DataFrame, company_map: pd.DataFrame,
+                          crowd_df: pd.DataFrame) -> pd.DataFrame:
+    """同公司抱团度 = 持仓市值加权的公司维度 crowd_score 均值"""
+    co_crowd = crowd_df[crowd_df['c_company_code'] != 'MKT'][
+        ['c_company_code', 'c_stk_code', 'c_crowd_score']]
     df = holdings.merge(company_map, on='c_fd_code', how='inner')
-    # 每家公司内各股票的总持仓市值
-    co_stk = df.groupby(['c_company_code', 'c_stk_code'])['c_hold_value'].sum().reset_index()
-    co_stk['_score'] = (co_stk.groupby('c_company_code')['c_hold_value']
-                        .rank(pct=True, method='average'))
-    # 回到基金持仓维度
-    df2 = df.merge(co_stk[['c_company_code', 'c_stk_code', '_score']],
-                   on=['c_company_code', 'c_stk_code'], how='inner')
-    df2['wt_score'] = df2['c_hold_value'] * df2['_score']
-    g = df2.groupby('c_fd_code').agg(wt=('wt_score', 'sum'), w=('c_hold_value', 'sum'))
-    result = (g['wt'] / g['w']).round(4).rename('c_crowd_internal_score').reset_index()
-    return result
+    df = df.merge(co_crowd, on=['c_company_code', 'c_stk_code'], how='inner')
+    df['wt_score'] = df['c_hold_value'] * df['c_crowd_score']
+    g = df.groupby('c_fd_code').agg(wt=('wt_score', 'sum'), w=('c_hold_value', 'sum'))
+    return (g['wt'] / g['w']).round(4).rename('c_crowd_internal_score').reset_index()
 
 
 def _calc_crowd_scores(doris: DorisConnector, fund_codes: list[str],
                        report_date: str) -> pd.DataFrame:
-    """计算基金级全市场和同公司抱团度（前向填充到季报期）"""
-    semi_date = next(d for d in generate_report_dates(report_date, 16)
+    """计算基金级全市场和同公司抱团度（季报期前向填充最近半年报）"""
+    # reversed() 确保取最近的半年报期，而非最早的
+    semi_date = next(d for d in reversed(generate_report_dates(report_date, 16))
                      if d[5:] in ('06-30', '12-31'))
 
-    crowd_scores = _query_crowd_scores(doris, semi_date)
+    crowd_df = _query_crowd_scores(doris, semi_date)
     holdings = _query_holdings_for_crowd(doris, fund_codes, semi_date)
     company_map = _get_company_map(doris, fund_codes)
 
-    mkt = _calc_crowd_mkt(holdings, crowd_scores)
-    internal = _calc_crowd_internal(holdings, company_map)
+    mkt = _calc_crowd_mkt(holdings, crowd_df)
+    internal = _calc_crowd_internal(holdings, company_map, crowd_df)
     return mkt.merge(internal, on='c_fd_code', how='outer')
 
 

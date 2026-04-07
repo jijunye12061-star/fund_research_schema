@@ -27,8 +27,8 @@ logger = logging.getLogger(__name__)
 ENV = 'dev'
 
 OUTPUT_COLS = [
-    'c_report_date', 'c_stk_code',
-    'c_total_hold_mv', 'c_crowd_score_mkt',
+    'c_report_date', 'c_company_code', 'c_stk_code',
+    'c_total_hold_mv', 'c_crowd_score',
 ]
 
 
@@ -52,6 +52,17 @@ def _get_equity_funds(doris: DorisConnector, report_date: str) -> list[str]:
     return doris.query(sql, report_date=report_date)['c_fd_code'].tolist()
 
 
+def _get_fund_company_map(doris: DorisConnector, fund_codes: list[str]) -> pd.DataFrame:
+    """获取基金→公司代码映射（仅含有公司代码的基金）"""
+    sql = """
+    SELECT DISTINCT c_fd_code, c_company_code
+    FROM tytdata.tb_fd_basic_info
+    WHERE c_fd_code IN (:code_list)
+      AND c_company_code IS NOT NULL
+    """
+    return doris.query_batch(sql, code_list=fund_codes)
+
+
 def _query_full_holdings(doris: DorisConnector, fund_codes: list[str],
                          report_date: str) -> pd.DataFrame:
     """查询全持仓（半年报 c_style IN ('02','04')），去重后取最大市值"""
@@ -70,14 +81,28 @@ def _query_full_holdings(doris: DorisConnector, fund_codes: list[str],
 
 # ==================== 计算 ====================
 
-def _calc_market_crowding(holdings: pd.DataFrame) -> pd.DataFrame:
-    """按股票聚合全市场权益基金持仓市值，计算百分位排名"""
+def _rank_by_mv(holdings: pd.DataFrame, company_code: str) -> pd.DataFrame:
+    """按持仓市值合计做百分位排名，返回带 c_company_code 的结果"""
     agg = (holdings.groupby('c_stk_code')['c_hold_value']
            .sum()
            .rename('c_total_hold_mv')
            .reset_index())
-    agg['c_crowd_score_mkt'] = agg['c_total_hold_mv'].rank(pct=True, method='average').round(4)
+    agg['c_crowd_score'] = agg['c_total_hold_mv'].rank(pct=True, method='average').round(4)
+    agg['c_company_code'] = company_code
     return agg
+
+
+def _calc_all_crowding(holdings: pd.DataFrame, company_map: pd.DataFrame) -> pd.DataFrame:
+    """计算全市场 + 各公司维度的个股抱团度，一次返回所有结果"""
+    mkt = _rank_by_mv(holdings, 'MKT')
+
+    df = holdings.merge(company_map, on='c_fd_code', how='inner')
+    company_parts = [
+        _rank_by_mv(grp, company_code)
+        for company_code, grp in df.groupby('c_company_code')
+    ]
+
+    return pd.concat([mkt] + company_parts, ignore_index=True)
 
 
 # ==================== 主入口 ====================
@@ -92,14 +117,17 @@ def run(calc_date: str) -> None:
         assert fund_codes, f"tb_fd_category 未找到 {calc_date} 的权益基金，请检查分类表是否已更新"
         logger.info(f"广义权益基金 {len(fund_codes)} 只")
 
+        company_map = _get_fund_company_map(doris, fund_codes)
+        logger.info(f"有公司映射的基金 {len(company_map)} 只，涉及 {company_map['c_company_code'].nunique()} 家公司")
+
         holdings = _query_full_holdings(doris, fund_codes, calc_date)
         logger.info(f"持仓记录: {len(holdings)}")
 
-        result = _calc_market_crowding(holdings)
+        result = _calc_all_crowding(holdings, company_map)
         result['c_report_date'] = pd.to_datetime(calc_date)
         doris.insert('tb_stk_crowding_score', result[OUTPUT_COLS])
 
-    logger.info(f"写入完成 {calc_date}: {len(result)} 条")
+    logger.info(f"写入完成 {calc_date}: {len(result)} 条（全市场+各公司）")
 
 
 if __name__ == '__main__':
