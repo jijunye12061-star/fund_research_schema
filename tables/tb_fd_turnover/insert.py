@@ -70,7 +70,7 @@ def _query_stk_mv(doris: DorisConnector, d0: str, d1: str, d2: str) -> pd.DataFr
     SELECT c_fd_code, c_report_date, MAX(c_stk_total_mv) AS c_stk_total_mv
     FROM tytdata.tb_fd_asset_allocation
     WHERE c_report_date IN (:d0, :d1, :d2)
-      AND c_is_stat = -1
+      AND c_style IN ('01', '02', '03', '04')
     GROUP BY c_fd_code, c_report_date
     """
     return doris.query(sql, d0=d0, d1=d1, d2=d2)
@@ -102,6 +102,9 @@ def _calc_turnover(trade_df: pd.DataFrame, mv_df: pd.DataFrame,
     pivot['c_avg_stk_mv'] = pivot[[d0, d1, d2]].mean(axis=1)
     avg_mv = pivot[['c_avg_stk_mv']].reset_index()
 
+    biz['SHARECOST'] = biz['SHARECOST'].fillna(0)
+    biz['SELLSUM'] = biz['SELLSUM'].fillna(0)
+
     result = biz.rename(columns={
         'FUNDCODE': 'c_fd_code',
         'SHARECOST': 'c_buy_amount',
@@ -111,6 +114,7 @@ def _calc_turnover(trade_df: pd.DataFrame, mv_df: pd.DataFrame,
     result['c_turnover_rate'] = (
         (result['c_buy_amount'] + result['c_sell_amount']) / result['c_avg_stk_mv'] * 100
     ).round(4)
+    result.loc[result['c_avg_stk_mv'] == 0, 'c_turnover_rate'] = None
     result['c_report_date'] = pd.to_datetime(calc_date)
     return result
 
