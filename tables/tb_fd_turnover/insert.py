@@ -151,6 +151,8 @@ if __name__ == '__main__':
         raw = sys.argv[1]
         run(f'{raw[:4]}-{raw[4:6]}-{raw[6:]}')
     else:
-        # 历史补数：近 20 个半年报期
-        for dt in _semi_annual_dates('2025-12-31', 20):
+        # 历史补数：从 2015-12-31 起（项目数据起点）到最新期
+        start = '2015-12-31'
+        all_dates = _semi_annual_dates('2025-12-31', 40)  # 40期覆盖20年
+        for dt in [d for d in all_dates if d >= start]:
             run(dt)

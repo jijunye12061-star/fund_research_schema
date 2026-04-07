@@ -50,8 +50,31 @@
 
 ### 股票市值来源
 
-使用 `tb_fd_asset_allocation.c_stk_total_mv`（对应 Oracle 的 SIMVSUM，纯股票投资市值合计），不含可转债等。查询时 `c_is_stat = -1` 取合并统计口径，同一期多条记录取 MAX。
+使用 `tb_fd_asset_allocation.c_stk_total_mv`（对应 Oracle 的 SIMVSUM，纯股票投资市值合计），不含可转债等。
+查询条件用 `c_style IN ('01','02','03','04')` 去除 05/06 重复行，同一期多条记录取 MAX。
+**不加 `c_is_stat` 过滤**：-1 和 0 对同一基金是互斥的，两类数据来源一致，MAX 后结果相同。
 
 ### H2 缺失处理
 
 若基金无 H1 数据（STYLE='02' 缺失），无法差分，该基金当期不写入。
+
+### 基金变动多段记录
+
+基金发生变更时，同一年 STYLE='04' 可能有多条不同 STARTDATE 的记录。
+计算前先 `groupby('FUNDCODE').sum()` 聚合，避免 merge 产生笛卡尔积。
+
+### 换手率无效处理
+
+| 情形 | c_turnover_rate |
+|------|----------------|
+| c_avg_stk_mv < 100万 | NULL（过渡态/清盘期，无业务含义）|
+| c_avg_stk_mv = 0 | NULL（含于上条）|
+| 单边无买入或无卖出 | SHARECOST/SELLSUM fillna(0) 后正常计算 |
+
+---
+
+## 历史补数
+
+- **起始期**：`2015-12-31`（项目数据起点，支持 2016 年 portfolio 标签的消费）
+- **结束期**：当前最新期
+- **运行方式**：`__main__` 无参数时自动按序补数，UNIQUE KEY 覆盖写入

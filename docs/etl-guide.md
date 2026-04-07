@@ -114,6 +114,57 @@ if __name__ == '__main__':
     run(biz_date)
 ```
 
+## 新表数据验证工作流
+
+新 insert.py 上线前，按以下步骤验证，**不跳过任何一步**。
+
+### 步骤一：代码审查（开发自查）
+
+- SQL 过滤条件是否正确（参考下方 Oracle 源表业务规则）
+- 聚合/差分逻辑有无笛卡尔积风险（多条同 key 记录要先 groupby SUM）
+- NULL 是否 fillna（单边缺失 vs 真实 NaN 的业务含义区分）
+- 极端分母处理（= 0 或 < 阈值时置 None）
+
+### 步骤二：抽样手算（运行前）
+
+从源表取 1-2 个基金的真实数据，按计算公式手算，与 insert.py 的逻辑对齐：
+
+```bash
+# 拉 Oracle 源数据
+curl -X POST .../ty/sql -d '{"sql": "...", "db": "oracle"}'
+# 拉 Doris 分母/参考数据
+curl -X POST .../ty/sql -d '{"sql": "..."}'
+```
+
+### 步骤三：运行测试期（2期）
+
+运行最近两个完整报告期，记录条数和日志中的 warning。
+
+### 步骤四：输出数据检查
+
+```sql
+-- 分布统计
+SELECT COUNT(*), COUNT(target_col), 
+       SUM(CASE WHEN target_col < 0 THEN 1 ELSE 0 END) as neg_cnt,
+       MIN(target_col), MAX(target_col),
+       AVG(target_col),
+       PERCENTILE_APPROX(target_col, 0.5) as median,
+       PERCENTILE_APPROX(target_col, 0.9) as p90
+FROM tytdata.tb_xxx WHERE c_report_date = '...'
+```
+
+关注：
+- **NULL 率**：> 10% 需解释（是源数据还是业务规则）
+- **负值**：数值型指标出现负值必须追查根因
+- **精度截断**：出现大量等于 DECIMAL 上限的值说明字段精度不足
+- **极端值**：p99 / max 是否合理，结合业务判断（如量化基金换手率高属正常）
+
+### 步骤五：对照验算
+
+取步骤四发现的典型基金（正常值 + 异常值各 1 个），从源表重新手算核对。
+
+---
+
 ## 数据同步策略
 
 ### 优先使用 Doris
