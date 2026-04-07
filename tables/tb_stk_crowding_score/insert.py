@@ -32,6 +32,14 @@ OUTPUT_COLS = [
 ]
 
 
+# ==================== 辅助 ====================
+
+def _semi_annual_dates(calc_date: str, n: int) -> list[str]:
+    """最近 n 个半年报期（含 calc_date 当期，仅 06-30/12-31）"""
+    return [d for d in generate_report_dates(calc_date, n * 2)
+            if d[5:] in ('06-30', '12-31')][:n]
+
+
 # ==================== 数据查询 ====================
 
 def _get_equity_funds(doris: DorisConnector, report_date: str) -> list[str]:
@@ -81,6 +89,7 @@ def run(calc_date: str) -> None:
 
     with DorisConnector(ENV) as doris:
         fund_codes = _get_equity_funds(doris, calc_date)
+        assert fund_codes, f"tb_fd_category 未找到 {calc_date} 的权益基金，请检查分类表是否已更新"
         logger.info(f"广义权益基金 {len(fund_codes)} 只")
 
         holdings = _query_full_holdings(doris, fund_codes, calc_date)
@@ -98,8 +107,6 @@ if __name__ == '__main__':
         raw = sys.argv[1]
         run(f'{raw[:4]}-{raw[4:6]}-{raw[6:]}')
     else:
-        # 历史补数：近 20 个半年报期
-        semi_dates = [d for d in generate_report_dates('2025-12-31', 40)
-                      if d[5:] in ('06-30', '12-31')]
-        for dt in semi_dates:
+        # 历史补数：从 2015-12-31 起（项目数据起点）
+        for dt in [d for d in _semi_annual_dates('2025-12-31', 40) if d >= '2015-12-31']:
             run(dt)
