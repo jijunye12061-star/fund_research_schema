@@ -85,12 +85,18 @@ def _calc_turnover(trade_df: pd.DataFrame, mv_df: pd.DataFrame,
     is_h1 = calc_date[5:] == '06-30'
     d0, d1, d2 = _denom_dates(calc_date)
 
-    # 买卖金额
+    # 买卖金额 - 先聚合，防止基金变动时同FUNDCODE存在多段记录
     if is_h1:
-        biz = trade_df[trade_df['STYLE'] == '02'][['FUNDCODE', 'SHARECOST', 'SELLSUM']].copy()
+        biz = (trade_df[trade_df['STYLE'] == '02']
+               .groupby('FUNDCODE')[['SHARECOST', 'SELLSUM']].sum()
+               .reset_index())
     else:
-        full = trade_df[trade_df['STYLE'] == '04'][['FUNDCODE', 'SHARECOST', 'SELLSUM']]
-        h1 = trade_df[trade_df['STYLE'] == '02'][['FUNDCODE', 'SHARECOST', 'SELLSUM']]
+        full = (trade_df[trade_df['STYLE'] == '04']
+                .groupby('FUNDCODE')[['SHARECOST', 'SELLSUM']].sum()
+                .reset_index())
+        h1 = (trade_df[trade_df['STYLE'] == '02']
+              .groupby('FUNDCODE')[['SHARECOST', 'SELLSUM']].sum()
+              .reset_index())
         biz = full.merge(h1, on='FUNDCODE', suffixes=('_full', '_h1'))
         biz['SHARECOST'] = biz['SHARECOST_full'] - biz['SHARECOST_h1']
         biz['SELLSUM'] = biz['SELLSUM_full'] - biz['SELLSUM_h1']
@@ -114,7 +120,8 @@ def _calc_turnover(trade_df: pd.DataFrame, mv_df: pd.DataFrame,
     result['c_turnover_rate'] = (
         (result['c_buy_amount'] + result['c_sell_amount']) / result['c_avg_stk_mv'] * 100
     ).round(4)
-    result.loc[result['c_avg_stk_mv'] == 0, 'c_turnover_rate'] = None
+    # 分母为0或市值极小（<100万）：过渡态基金，换手率无业务含义
+    result.loc[result['c_avg_stk_mv'] < 1_000_000, 'c_turnover_rate'] = None
     result['c_report_date'] = pd.to_datetime(calc_date)
     return result
 
