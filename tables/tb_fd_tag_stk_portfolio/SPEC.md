@@ -51,15 +51,16 @@
 | `c_active_tag` | VARCHAR | **主动配置**（两者均≥70%）/ **主动板块配置** / **主动行业配置** / 空 |
 | `c_new_stk_ratio` | DECIMAL | 持股扩新（%）：T期全持仓中未出现在T-1~T-3期的合计权重；季报期为NULL |
 | `c_new_stk_tag` | VARCHAR | **积极**（≥50%）/ **适中**（≥20%）/ **保守**（<20%）；季报期为NULL |
-| `c_crowd_score` | DECIMAL | **预留**：全市场抱团度（依赖 tb_stk_crowding_score，待实现） |
-| `c_crowd_internal_score` | DECIMAL | **预留**：同公司抱团度（待实现） |
+| `c_crowd_score` | DECIMAL | 全市场抱团度：基金持仓加权的 tb_stk_crowding_score.c_crowd_score_mkt 均值；仅半年报期有值，季报期前向填充 |
+| `c_crowd_internal_score` | DECIMAL | 同公司抱团度：公司内股票持仓市值百分位排名的加权均值；仅半年报期有值，季报期前向填充 |
+| `c_crowd_tag` | VARCHAR | 抱团度标签：**高抱团** / **中抱团** / **低抱团**（全市场+同公司排名等权复合，按基金类型70%/30%分位） |
 
 ### 交易特征
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `c_turnover_avg` | DECIMAL | **预留**：换手率均值（依赖 FUND_IV_STOCKTRADESUM Doris表，待实现） |
-| `c_turnover_tag` | VARCHAR | **预留**：高换手/中换手/低换手（待实现） |
+| `c_turnover_avg` | DECIMAL | 换手率均值（倍）：近4期半年报的 tb_fd_turnover.c_turnover_rate 均值除以100；季报期前向填充 |
+| `c_turnover_tag` | VARCHAR | 换手率标签：**高换手** / **中换手** / **低换手**（按基金类型70%/30%分位） |
 | `c_heavy_retain_rate` | DECIMAL | 重仓股留存率均值（%）：T-1期重仓在T期保留数量/T-1期重仓数量，近8期均值 |
 | `c_heavy_turnover` | DECIMAL | 重仓股换手率均值（%）：1 - T-1期留存重仓权重/T-1期总权重，近8期均值 |
 | `c_heavy_hold_period` | DECIMAL | 重仓股持有期均值（期数）：当前重仓股各自连续出现在重仓列表的期数均值 |
@@ -89,7 +90,7 @@
 
 ## 延后实现事项
 
-- [ ] `c_turnover_avg` / `c_turnover_tag`：需要建立基金换手率 Doris 表（Oracle 源：TYTFUND.FUND_IV_STOCKTRADESUM）
-- [ ] `c_crowd_score` / `c_crowd_internal_score`：需要先建 `tb_stk_crowding_score` 个股抱团度中间表
+- [x] `c_turnover_avg` / `c_turnover_tag`：已建 `tb_fd_turnover` 表（Oracle FUND_IV_STOCKTRADESUM → Doris）
+- [x] `c_crowd_score` / `c_crowd_internal_score` / `c_crowd_tag`：已建 `tb_stk_crowding_score` 个股抱团度中间表
 - [ ] 买入/卖出时点标签（左侧/右侧）：需要个股区间收益数据
 - [ ] 回溯修改 `tb_fd_tag_stk_style`：相对标签改为按基金类型分别排名（当前为全市场统一）

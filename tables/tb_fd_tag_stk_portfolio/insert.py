@@ -42,7 +42,7 @@ OUTPUT_COLS = [
     'c_sector_concent_tag', 'c_ind_concent_tag', 'c_stk_concent_tag',
     'c_active_sector', 'c_active_ind', 'c_active_sector_rank', 'c_active_ind_rank', 'c_active_tag',
     'c_new_stk_ratio', 'c_new_stk_tag',
-    'c_crowd_score', 'c_crowd_internal_score',
+    'c_crowd_score', 'c_crowd_internal_score', 'c_crowd_tag',
     'c_turnover_avg', 'c_turnover_tag',
     'c_heavy_retain_rate', 'c_heavy_turnover', 'c_heavy_hold_period',
     'c_heavy_trade_rank', 'c_heavy_trade_tag',
@@ -436,6 +436,133 @@ def _assign_trade_tags(result: pd.DataFrame, fund_types: pd.DataFrame) -> None:
     result['c_heavy_trade_tag'] = np.where(df['_composite'].isna(), None, tags)
 
 
+# ==================== 换手率 ====================
+
+def _calc_turnover(doris: DorisConnector, fund_codes: list[str],
+                   report_date: str) -> pd.DataFrame:
+    """查 tb_fd_turnover 近4期半年报，计算换手率均值（前向填充到季报期）"""
+    all_semi = [d for d in generate_report_dates(report_date, 16)
+                if d[5:] in ('06-30', '12-31')]
+    semi_date = all_semi[0]  # 最近半年报期（≤report_date）
+    semi_4 = [d for d in generate_report_dates(semi_date, 8)
+              if d[5:] in ('06-30', '12-31')][:4]
+
+    sql = """
+    SELECT c_fd_code, c_report_date, c_turnover_rate
+    FROM tytdata.tb_fd_turnover
+    WHERE c_fd_code IN (:code_list)
+      AND c_report_date BETWEEN :start_date AND :end_date
+    """
+    df = doris.query_batch(sql, code_list=fund_codes,
+                           start_date=semi_4[-1], end_date=semi_4[0])
+    if df.empty:
+        return pd.DataFrame(columns=['c_fd_code', 'c_turnover_avg'])
+
+    avg = df.groupby('c_fd_code')['c_turnover_rate'].mean()
+    return (avg / 100).round(4).rename('c_turnover_avg').reset_index()
+
+
+def _assign_turnover_tag(result: pd.DataFrame, fund_types: pd.DataFrame) -> None:
+    """按基金类型70%/30%分位打换手率标签（原地修改）"""
+    df = _merge_types(result, fund_types)
+    q70 = df.groupby('c_type1_code')['c_turnover_avg'].transform(lambda x: x.quantile(0.7))
+    q30 = df.groupby('c_type1_code')['c_turnover_avg'].transform(lambda x: x.quantile(0.3))
+    tags = np.where(df['c_turnover_avg'] >= q70, '高换手',
+           np.where(df['c_turnover_avg'] <= q30, '低换手', '中换手'))
+    result['c_turnover_tag'] = np.where(df['c_turnover_avg'].isna(), None, tags)
+
+
+# ==================== 抱团度 ====================
+
+def _query_crowd_scores(doris: DorisConnector, semi_date: str) -> pd.DataFrame:
+    """查询个股全市场抱团度得分"""
+    sql = """
+    SELECT c_stk_code, c_crowd_score_mkt
+    FROM tytdata.tb_stk_crowding_score
+    WHERE c_report_date = :d
+    """
+    return doris.query(sql, d=semi_date)
+
+
+def _query_holdings_for_crowd(doris: DorisConnector, fund_codes: list[str],
+                               semi_date: str) -> pd.DataFrame:
+    """查询半年报全持仓（用于抱团度加权聚合）"""
+    sql = """
+    SELECT c_fd_code, c_stk_code, MAX(c_hold_value) AS c_hold_value
+    FROM tytdata.tb_fd_portfolio_stk
+    WHERE c_fd_code IN (:code_list)
+      AND c_report_date = :report_date
+      AND c_style IN ('02', '04')
+      AND c_hold_value > 0
+      AND LENGTH(c_stk_code) = 6
+    GROUP BY c_fd_code, c_stk_code
+    """
+    return doris.query_batch(sql, code_list=fund_codes, report_date=semi_date)
+
+
+def _get_company_map(doris: DorisConnector, fund_codes: list[str]) -> pd.DataFrame:
+    """查询基金→公司代码映射"""
+    sql = """
+    SELECT c_fd_code, c_company_code
+    FROM tytdata.tb_fd_basic_info
+    WHERE c_fd_code IN (:code_list)
+    """
+    return doris.query_batch(sql, code_list=fund_codes)
+
+
+def _calc_crowd_mkt(holdings: pd.DataFrame, crowd_scores: pd.DataFrame) -> pd.DataFrame:
+    """全市场抱团度 = 持仓市值加权的 crowd_score_mkt 均值"""
+    df = holdings.merge(crowd_scores, on='c_stk_code', how='inner')
+    df['wt_score'] = df['c_hold_value'] * df['c_crowd_score_mkt']
+    g = df.groupby('c_fd_code').agg(wt=('wt_score', 'sum'), w=('c_hold_value', 'sum'))
+    result = (g['wt'] / g['w']).round(4).rename('c_crowd_score').reset_index()
+    return result
+
+
+def _calc_crowd_internal(holdings: pd.DataFrame, company_map: pd.DataFrame) -> pd.DataFrame:
+    """同公司抱团度 = 公司内持仓市值百分位排名加权均值"""
+    df = holdings.merge(company_map, on='c_fd_code', how='inner')
+    # 每家公司内各股票的总持仓市值
+    co_stk = df.groupby(['c_company_code', 'c_stk_code'])['c_hold_value'].sum().reset_index()
+    co_stk['_score'] = (co_stk.groupby('c_company_code')['c_hold_value']
+                        .rank(pct=True, method='average'))
+    # 回到基金持仓维度
+    df2 = df.merge(co_stk[['c_company_code', 'c_stk_code', '_score']],
+                   on=['c_company_code', 'c_stk_code'], how='inner')
+    df2['wt_score'] = df2['c_hold_value'] * df2['_score']
+    g = df2.groupby('c_fd_code').agg(wt=('wt_score', 'sum'), w=('c_hold_value', 'sum'))
+    result = (g['wt'] / g['w']).round(4).rename('c_crowd_internal_score').reset_index()
+    return result
+
+
+def _calc_crowd_scores(doris: DorisConnector, fund_codes: list[str],
+                       report_date: str) -> pd.DataFrame:
+    """计算基金级全市场和同公司抱团度（前向填充到季报期）"""
+    semi_date = next(d for d in generate_report_dates(report_date, 16)
+                     if d[5:] in ('06-30', '12-31'))
+
+    crowd_scores = _query_crowd_scores(doris, semi_date)
+    holdings = _query_holdings_for_crowd(doris, fund_codes, semi_date)
+    company_map = _get_company_map(doris, fund_codes)
+
+    mkt = _calc_crowd_mkt(holdings, crowd_scores)
+    internal = _calc_crowd_internal(holdings, company_map)
+    return mkt.merge(internal, on='c_fd_code', how='outer')
+
+
+def _assign_crowd_tag(result: pd.DataFrame, fund_types: pd.DataFrame) -> None:
+    """全市场+同公司排名等权复合，按基金类型70%/30%阈值打抱团标签（原地修改）"""
+    df = _merge_types(result, fund_types)
+
+    mkt_rank = df.groupby('c_type1_code')['c_crowd_score'].rank(pct=True, na_option='keep')
+    int_rank = df.groupby('c_type1_code')['c_crowd_internal_score'].rank(pct=True, na_option='keep')
+    composite = (mkt_rank + int_rank) / 2
+
+    tags = np.where(composite >= 0.7, '高抱团',
+           np.where(composite <= 0.3, '低抱团', '中抱团'))
+    result['c_crowd_tag'] = np.where(composite.isna(), None, tags)
+
+
 # ==================== 主入口 ====================
 
 def run(calc_date: str) -> None:
@@ -473,8 +600,13 @@ def run(calc_date: str) -> None:
         _assign_active_tags(result, fund_types)
         _assign_trade_tags(result, fund_types)
 
-        for col in ['c_crowd_score', 'c_crowd_internal_score', 'c_turnover_avg', 'c_turnover_tag']:
-            result[col] = None
+        turnover = _calc_turnover(doris, fund_codes, report_date)
+        crowd = _calc_crowd_scores(doris, fund_codes, report_date)
+        result = result.merge(turnover, on='c_fd_code', how='left')
+        result = result.merge(crowd, on='c_fd_code', how='left')
+
+        _assign_turnover_tag(result, fund_types)
+        _assign_crowd_tag(result, fund_types)
 
         result['c_report_date'] = pd.to_datetime(report_date)
         doris.insert('tb_fd_tag_stk_portfolio', result[OUTPUT_COLS])
