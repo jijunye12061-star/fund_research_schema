@@ -120,7 +120,7 @@ if __name__ == '__main__':
 
 ### 步骤一：代码审查（开发自查）
 
-- SQL 过滤条件是否正确（参考下方 Oracle 源表业务规则）
+- SQL 过滤条件是否正确（参考 database-conventions.md "Oracle 源表业务规则"章节）
 - 聚合/差分逻辑有无笛卡尔积风险（多条同 key 记录要先 groupby SUM）
 - NULL 是否 fillna（单边缺失 vs 真实 NaN 的业务含义区分）
 - 极端分母处理（= 0 或 < 阈值时置 None）

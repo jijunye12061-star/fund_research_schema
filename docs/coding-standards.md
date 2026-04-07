@@ -91,9 +91,8 @@ def run(calc_date: str) -> None:
 
 if __name__ == '__main__':
     import sys
-    biz_date = sys.argv[1] if len(sys.argv) > 1 else '2026-01-06'
-    # DS传入格式为 %Y%m%d，需要转换
-    biz_date = parse_biz_date(biz_date)
+    biz_date = sys.argv[1] if len(sys.argv) > 1 else '20260106'
+    biz_date = parse_biz_date(biz_date)  # DS传入 %Y%m%d → %Y-%m-%d，见 etl-guide.md "日期参数"
     run(biz_date)
 ```
 
@@ -126,7 +125,6 @@ _setup_path()
 
 - **年化收益率**：基于自然日（365 天）
 - **年化波动率**：基于交易日（252 天）
-- **回撤和风险指标**：存储为正值（行业标准）
-- **百分比**：存储为已乘 100 的值（如 5.2 表示 5.2%）
 - **YTD/区间收益基准**：取上一期最后一个交易日（不是当期第一天），使用 `nav_adj_pre` 字段
 - **两级指标体系**：基础指标（收益率、回撤）最低数据要求；风险调整指标（Sharpe、波动率）要求 ≥ 10 个交易日
+- **存储约定**（回撤正值、百分比乘100等）：见 database-conventions.md "研究环境设计原则"
