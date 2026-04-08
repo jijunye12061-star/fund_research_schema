@@ -93,4 +93,4 @@
 - [x] `c_turnover_avg` / `c_turnover_tag`：已建 `tb_fd_turnover` 表（Oracle FUND_IV_STOCKTRADESUM → Doris）
 - [x] `c_crowd_score` / `c_crowd_internal_score` / `c_crowd_tag`：已建 `tb_stk_crowding_score` 个股抱团度中间表
 - [ ] 买入/卖出时点标签（左侧/右侧）：需要个股区间收益数据
-- [ ] 回溯修改 `tb_fd_tag_stk_style`：相对标签改为按基金类型分别排名（当前为全市场统一）
+- [x] 回溯修改 `tb_fd_tag_stk_style`：相对标签改为按基金类型分别排名（已修复）
