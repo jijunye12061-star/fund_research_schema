@@ -59,14 +59,17 @@ def _get_trade_date(doris: DorisConnector, report_date: str) -> str:
 
 # ==================== 数据查询 ====================
 
-def _get_fund_codes(doris: DorisConnector, report_date: str) -> list[str]:
-    """取前四类基金代码"""
+def _get_fund_types(doris: DorisConnector, report_date: str) -> pd.DataFrame:
+    """主动权益(001001)+全部混合(004)，仅主代码，返回(c_fd_code, c_type1_code)"""
     sql = """
-    SELECT DISTINCT c_fd_code FROM tytdata.tb_fd_category
-    WHERE c_type1_code IN ('001','002','003','004')
-      AND c_report_date = :report_date
+    SELECT DISTINCT c.c_fd_code, c.c_type1_code
+    FROM tytdata.tb_fd_category c
+    JOIN tytdata.tb_fd_basic_info b ON c.c_fd_code = b.c_fd_code
+    WHERE (c.c_type2_code = '001001' OR c.c_type1_code = '004')
+      AND c.c_report_date = :report_date
+      AND (b.c_init_code = b.c_fd_code OR b.c_init_code IS NULL)
     """
-    return doris.query(sql, report_date=report_date)['c_fd_code'].tolist()
+    return doris.query(sql, report_date=report_date)
 
 
 def _get_hk_funds(doris: DorisConnector, report_date: str) -> set:
@@ -187,9 +190,12 @@ def _assign_size_vg_tags(result: pd.DataFrame, avg_50: float, avg_70: float,
     result.loc[both_nan, 'c_vg_tag'] = None
 
 
-def _assign_relative_tags(result: pd.DataFrame, hk_funds: set) -> None:
-    """原地打动量/盈利/质量标签（跨基金70%/30%分位，排除港股基金）"""
-    non_hk = ~result['c_fd_code'].isin(hk_funds)
+def _assign_relative_tags(result: pd.DataFrame, fund_types: pd.DataFrame,
+                           hk_funds: set) -> None:
+    """原地打动量/盈利/质量/红利标签（按基金类型分别70%/30%分位，排除港股基金）"""
+    df = result.merge(fund_types[['c_fd_code', 'c_type1_code']], on='c_fd_code', how='left')
+    non_hk = ~df['c_fd_code'].isin(hk_funds)
+
     tag_config = [
         ('c_momentum_score', 'c_momentum_tag', '高动量', '中动量', '低动量'),
         ('c_profit_score',   'c_profit_tag',   '高盈利', '中盈利', '低盈利'),
@@ -197,14 +203,16 @@ def _assign_relative_tags(result: pd.DataFrame, hk_funds: set) -> None:
         ('c_dividend_score', 'c_dividend_tag', '高股息', '中股息', '低股息'),
     ]
     for score_col, tag_col, high, mid, low in tag_config:
-        valid = result.loc[non_hk, score_col].dropna()
-        p70, p30 = valid.quantile(0.70), valid.quantile(0.30)
-        result[tag_col] = np.select(
-            [result[score_col] >= p70, result[score_col] <= p30],
-            [high, low], default=mid
-        )
-        # 港股基金及无得分基金不打标签
-        result.loc[~non_hk | result[score_col].isna(), tag_col] = np.nan
+        valid_mask = non_hk & df[score_col].notna()
+        # 按基金类型分别计算70%/30%分位，再映射回原 index
+        q70 = df.loc[valid_mask].groupby('c_type1_code')[score_col].transform(
+            lambda x: x.quantile(0.7))
+        q30 = df.loc[valid_mask].groupby('c_type1_code')[score_col].transform(
+            lambda x: x.quantile(0.3))
+        tags = np.where(df.loc[valid_mask, score_col] >= q70, high,
+               np.where(df.loc[valid_mask, score_col] <= q30, low, mid))
+        result[tag_col] = np.nan
+        result.loc[valid_mask, tag_col] = tags
 
 
 # ==================== 主入口 ====================
@@ -215,7 +223,8 @@ def run(calc_date: str) -> None:
     logger.info(f"计算 {calc_date}，半年报窗口: {s_periods}")
 
     with DorisConnector(ENV) as doris:
-        fund_codes = _get_fund_codes(doris, calc_date)
+        fund_types = _get_fund_types(doris, calc_date)
+        fund_codes = fund_types['c_fd_code'].tolist()
         hk_funds = _get_hk_funds(doris, calc_date)
         logger.info(f"基金 {len(fund_codes)} 只，港股基金 {len(hk_funds)} 只")
 
@@ -249,7 +258,7 @@ def run(calc_date: str) -> None:
         avg_vg2 = float(np.mean([t[1] for t in vg_thresholds]))
 
         _assign_size_vg_tags(result, avg_50, avg_70, avg_vg1, avg_vg2)
-        _assign_relative_tags(result, hk_funds)
+        _assign_relative_tags(result, fund_types, hk_funds)
 
         result['c_report_date'] = pd.to_datetime(calc_date)
         doris.insert('tb_fd_tag_stk_style', result[OUTPUT_COLS])
