@@ -16,7 +16,9 @@ def _setup_path():
 
 _setup_path()
 
+import contextlib
 import logging
+import time
 from functools import reduce
 
 import numpy as np
@@ -25,8 +27,23 @@ import yaml
 from utils.db_connector import DorisConnector
 from utils.common import generate_report_dates
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+)
 logger = logging.getLogger(__name__)
+# 压制 db_connector 逐查询 INFO 日志（每次 query/query_batch 的耗时噪音）
+# Stream Load 成功/失败是 WARNING 级，仍然可见
+logging.getLogger('utils.db_connector').setLevel(logging.WARNING)
+
+
+@contextlib.contextmanager
+def _step(name: str):
+    """步骤计时器，打印开始/完成和耗时。"""
+    logger.info(f"[{name}] 开始")
+    t0 = time.perf_counter()
+    yield
+    logger.info(f"[{name}] 完成 {time.perf_counter() - t0:.2f}s")
 
 ENV = 'dev'
 
@@ -722,22 +739,38 @@ def run(calc_date: str) -> None:
     s_periods_ext = [d for d in generate_report_dates(report_date, 14) if d[5:] in ('06-30', '12-31')]
 
     with DorisConnector(ENV) as doris:
-        fund_types = _get_fund_types(doris, report_date)
-        fund_codes = fund_types['c_fd_code'].tolist()
-        logger.info(f"基金 {len(fund_codes)} 只")
-        logger.info(f"季度窗口: {q_periods[0]}~{q_periods[-1]}  半年报窗口: {s_periods[0]}~{s_periods[-1]}")
+        t_run = time.perf_counter()
 
-        ind_df = _query_ind_weight(doris, fund_codes, s_periods)
-        heavy_df = _query_heavy_stk(doris, fund_codes, q_periods)
-        full_df = _query_full_stk(doris, fund_codes, s_periods_ext)
-        benchmark = _query_benchmark(doris, s_periods)
+        with _step("查询: fund_types"):
+            fund_types = _get_fund_types(doris, report_date)
+            fund_codes = fund_types['c_fd_code'].tolist()
+        logger.info(f"基金 {len(fund_codes)} 只，季度窗口: {q_periods[0]}~{q_periods[-1]}，半年报窗口: {s_periods[0]}~{s_periods[-1]}")
 
-        sector_hhi = _calc_sector_hhi(ind_df)
-        ind_conc = _calc_ind_concentration(ind_df)
-        top10 = _calc_top10_ratio(heavy_df)
-        active = _calc_active_deviation(ind_df, benchmark)
-        new_stk = _calc_new_stk_ratio(full_df, report_date)
-        heavy = _calc_heavy_trade(heavy_df)
+        with _step("查询: ind_weight"):
+            ind_df = _query_ind_weight(doris, fund_codes, s_periods)
+
+        with _step("查询: heavy_stk"):
+            heavy_df = _query_heavy_stk(doris, fund_codes, q_periods)
+
+        with _step("查询: full_stk"):
+            full_df = _query_full_stk(doris, fund_codes, s_periods_ext)
+
+        with _step(f"查询: benchmark({len(s_periods)}期)"):
+            benchmark = _query_benchmark(doris, s_periods)
+
+        with _step("计算: 集中度指标"):
+            sector_hhi = _calc_sector_hhi(ind_df)
+            ind_conc = _calc_ind_concentration(ind_df)
+            top10 = _calc_top10_ratio(heavy_df)
+
+        with _step("计算: 主动偏离"):
+            active = _calc_active_deviation(ind_df, benchmark)
+
+        with _step("计算: 持股扩新"):
+            new_stk = _calc_new_stk_ratio(full_df, report_date)
+
+        with _step("计算: 重仓交易特征"):
+            heavy = _calc_heavy_trade(heavy_df)
 
         dfs = [sector_hhi, ind_conc, top10, active, new_stk, heavy]
         result = reduce(lambda l, r: l.merge(r, on='c_fd_code', how='outer'), dfs)
@@ -746,9 +779,15 @@ def run(calc_date: str) -> None:
         _assign_active_tags(result, fund_types)
         _assign_trade_tags(result, fund_types)
 
-        turnover = _calc_turnover(doris, fund_codes, report_date)
-        crowd = _calc_crowd_scores(doris, fund_codes, report_date)
-        timing = _calc_timing_scores(doris, fund_codes, report_date)
+        with _step("查询+计算: 换手率"):
+            turnover = _calc_turnover(doris, fund_codes, report_date)
+
+        with _step("查询+计算: 抱团度"):
+            crowd = _calc_crowd_scores(doris, fund_codes, report_date)
+
+        with _step("查询+计算: 买卖时机"):
+            timing = _calc_timing_scores(doris, fund_codes, report_date)
+
         result = result.merge(turnover, on='c_fd_code', how='left')
         result = result.merge(crowd, on='c_fd_code', how='left')
         result = result.merge(timing, on='c_fd_code', how='left')
@@ -758,9 +797,11 @@ def run(calc_date: str) -> None:
         _assign_timing_tags(result)
 
         result['c_report_date'] = pd.to_datetime(report_date)
-        doris.insert('tb_fd_tag_stk_portfolio', result[OUTPUT_COLS])
 
-    logger.info(f"写入完成: {len(result)} 条")
+        with _step("写入: Stream Load"):
+            doris.insert('tb_fd_tag_stk_portfolio', result[OUTPUT_COLS])
+
+    logger.info(f"写入完成: {len(result)} 条，总耗时 {time.perf_counter() - t_run:.2f}s")
 
 
 if __name__ == '__main__':
