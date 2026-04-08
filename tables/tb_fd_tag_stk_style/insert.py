@@ -60,12 +60,12 @@ def _get_trade_date(doris: DorisConnector, report_date: str) -> str:
 # ==================== 数据查询 ====================
 
 def _get_fund_types(doris: DorisConnector, report_date: str) -> pd.DataFrame:
-    """主动权益(001001)+全部混合(004)，仅主代码，返回(c_fd_code, c_type1_code)"""
+    """权益+固收加+混合（001/002/004），仅主代码（去重A/C子份额），返回(c_fd_code, c_type1_code)"""
     sql = """
     SELECT DISTINCT c.c_fd_code, c.c_type1_code
     FROM tytdata.tb_fd_category c
     JOIN tytdata.tb_fd_basic_info b ON c.c_fd_code = b.c_fd_code
-    WHERE (c.c_type2_code = '001001' OR c.c_type1_code = '004')
+    WHERE c.c_type1_code IN ('001', '002', '004')
       AND c.c_report_date = :report_date
       AND (b.c_init_code = b.c_fd_code OR b.c_init_code IS NULL)
     """
