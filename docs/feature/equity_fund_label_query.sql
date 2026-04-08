@@ -48,8 +48,6 @@ SELECT
     sty.c_quality_score,
     sty.c_dividend_tag,
     sty.c_dividend_score,
-    -- TODO: 风格稳定标签（待 tb_fd_tag_stk_style 补充 c_style_stable_tag 字段后填入）
-    -- sty.c_style_stable_tag,
 
     -- ── 组合构建 ──────────────────────────────────────────────
     pf.c_sector_concent_tag,                     -- 板块集中度
