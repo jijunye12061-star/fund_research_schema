@@ -43,11 +43,14 @@ def _semi_annual_dates(calc_date: str, n: int) -> list[str]:
 # ==================== 数据查询 ====================
 
 def _get_equity_funds(doris: DorisConnector, report_date: str) -> list[str]:
-    """广义权益基金：001(权益基金) + 004(混合型基金)"""
+    """主动权益(001001) + 全部混合型(004)，仅主代码（去重A/C份额、联接基金）"""
     sql = """
-    SELECT DISTINCT c_fd_code FROM tytdata.tb_fd_category
-    WHERE c_type1_code IN ('001', '004')
-      AND c_report_date = :report_date
+    SELECT DISTINCT c.c_fd_code
+    FROM tytdata.tb_fd_category c
+    JOIN tytdata.tb_fd_basic_info b ON c.c_fd_code = b.c_fd_code
+    WHERE (c.c_type2_code = '001001' OR c.c_type1_code = '004')
+      AND c.c_report_date = :report_date
+      AND (b.c_init_code = b.c_fd_code OR b.c_init_code IS NULL)
     """
     return doris.query(sql, report_date=report_date)['c_fd_code'].tolist()
 
