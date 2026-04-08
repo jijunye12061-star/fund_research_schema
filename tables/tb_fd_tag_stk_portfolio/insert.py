@@ -323,30 +323,33 @@ def _calc_heavy_trade(heavy_df: pd.DataFrame) -> pd.DataFrame:
         if len(periods) < 2:
             continue
 
+        # 预计算每期的持仓集合和子DataFrame，避免内层循环重复过滤
+        period_stk = {p: set(fdf.loc[fdf['c_report_date'] == p, 'c_stk_code']) for p in periods}
+        period_df  = {p: fdf[fdf['c_report_date'] == p] for p in periods}
+
         retain_rates, turnover_rates = [], []
         for i in range(1, len(periods)):
-            prev = fdf[fdf['c_report_date'] == periods[i - 1]]
-            curr = fdf[fdf['c_report_date'] == periods[i]]
-            prev_stk = set(prev['c_stk_code'])
-            curr_stk = set(curr['c_stk_code'])
+            prev_stk = period_stk[periods[i - 1]]
+            curr_stk = period_stk[periods[i]]
             retained = prev_stk & curr_stk
 
             retain_rates.append(len(retained) / len(prev_stk) * 100 if prev_stk else np.nan)
 
-            prev_total_w = prev['c_nav_ratio'].sum()
-            retained_w = curr[curr['c_stk_code'].isin(retained)]['c_nav_ratio'].sum()
+            prev_total_w = period_df[periods[i - 1]]['c_nav_ratio'].sum()
+            retained_w = period_df[periods[i]].loc[
+                period_df[periods[i]]['c_stk_code'].isin(retained), 'c_nav_ratio'
+            ].sum()
             turnover_rates.append(
                 (1 - retained_w / prev_total_w) * 100 if prev_total_w > 0 else np.nan
             )
 
-        # 持有期：当前期（最后一期）重仓股各自连续持有多少期
-        curr_period = periods[-1]
-        curr_stk = set(fdf[fdf['c_report_date'] == curr_period]['c_stk_code'])
+        # 持有期：当前期重仓股各自连续持有多少期（O(1) 集合查找）
+        curr_stk = period_stk[periods[-1]]
         hold_periods = []
         for stk in curr_stk:
             count = 0
             for p in reversed(periods):
-                if stk in set(fdf[fdf['c_report_date'] == p]['c_stk_code']):
+                if stk in period_stk[p]:
                     count += 1
                 else:
                     break
