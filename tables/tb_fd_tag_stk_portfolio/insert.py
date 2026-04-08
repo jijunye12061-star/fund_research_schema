@@ -458,7 +458,7 @@ def _calc_turnover(doris: DorisConnector, fund_codes: list[str],
       AND c_report_date BETWEEN :start_date AND :end_date
     """
     df = doris.query_batch(sql, code_list=fund_codes,
-                           start_date=semi_4[-1], end_date=semi_4[0])
+                           start_date=semi_4[0], end_date=semi_4[-1])
     if df.empty:
         return pd.DataFrame(columns=['c_fd_code', 'c_turnover_avg'])
 
