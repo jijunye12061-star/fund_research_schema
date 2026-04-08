@@ -34,8 +34,8 @@ import pandas as pd
 from utils.db_connector import OracleConnector, DorisConnector
 from utils.common import get_trade_calendar
 
-logging.basicConfig(level=logging.WARNING)
-logger = logging.getLogger(__name__)
+from utils.log import setup_logger
+logger = setup_logger(__name__)
 
 # ============================================================
 ENV = 'dev'

@@ -45,8 +45,8 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 from utils.db_connector import DorisConnector
 from utils.common import get_trade_calendar, get_active_funds, safe_divide
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from utils.log import setup_logger
+logger = setup_logger(__name__)
 
 # ============================================================
 ENV = 'dev'  # 切换环境: 'dev' | 'prod'

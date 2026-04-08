@@ -35,10 +35,8 @@ import numpy as np
 import pandas as pd
 from utils.db_connector import DorisConnector
 from utils.common import generate_report_dates, get_last_quarter_end
-import logging
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from utils.log import setup_logger
+logger = setup_logger(__name__)
 
 # ============================================================
 ENV = 'dev'  # 切换环境: 'dev' | 'prod'

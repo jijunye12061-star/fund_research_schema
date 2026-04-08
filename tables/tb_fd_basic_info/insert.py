@@ -29,8 +29,8 @@ def _setup_path():
 
 _setup_path()
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from utils.log import setup_logger
+logger = setup_logger(__name__)
 
 # ============================================================
 ENV = 'dev'  # 切换环境: 'dev' | 'prod'

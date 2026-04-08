@@ -16,34 +16,19 @@ def _setup_path():
 
 _setup_path()
 
-import contextlib
 import logging
 import time
-from functools import reduce
+from functools import partial, reduce
 
 import numpy as np
 import pandas as pd
 import yaml
 from utils.db_connector import DorisConnector
 from utils.common import generate_report_dates
+from utils.log import setup_logger, step
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-)
-logger = logging.getLogger(__name__)
-# 压制 db_connector 逐查询 INFO 日志（每次 query/query_batch 的耗时噪音）
-# Stream Load 成功/失败是 WARNING 级，仍然可见
-logging.getLogger('utils.db_connector').setLevel(logging.WARNING)
-
-
-@contextlib.contextmanager
-def _step(name: str):
-    """步骤计时器，打印开始/完成和耗时。"""
-    logger.info(f"[{name}] 开始")
-    t0 = time.perf_counter()
-    yield
-    logger.info(f"[{name}] 完成 {time.perf_counter() - t0:.2f}s")
+logger = setup_logger(__name__)
+_step = partial(step, logger)
 
 ENV = 'dev'
 

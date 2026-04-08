@@ -27,8 +27,8 @@ import logging
 import pandas as pd
 from utils.db_connector import OracleConnector, DorisConnector
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from utils.log import setup_logger
+logger = setup_logger(__name__)
 
 # ============================================================
 ENV = 'dev'

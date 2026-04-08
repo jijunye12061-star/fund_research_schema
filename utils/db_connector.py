@@ -26,12 +26,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+_SLOW_QUERY_THRESHOLD = 5.0  # 秒，超过此阈值升级为 WARNING
+
+
 def timer(func):
-    """函数执行时间装饰器"""
+    """函数执行时间装饰器：正常查询记 DEBUG，慢查询（≥5s）升级为 WARNING。"""
     def wrapper(*args, **kwargs):
         start = time.time()
         result = func(*args, **kwargs)
-        logger.info(f'{func.__name__} 耗时: {time.time() - start:.2f}s')
+        elapsed = time.time() - start
+        if elapsed >= _SLOW_QUERY_THRESHOLD:
+            logger.warning(f'慢查询: {func.__name__} 耗时 {elapsed:.2f}s')
+        else:
+            logger.debug(f'{func.__name__} 耗时: {elapsed:.2f}s')
         return result
     return wrapper
 
