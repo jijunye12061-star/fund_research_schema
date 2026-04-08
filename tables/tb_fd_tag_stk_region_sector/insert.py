@@ -48,11 +48,13 @@ OUTPUT_COLS = [
 # ==================== 数据查询 ====================
 
 def _get_fund_codes(doris: DorisConnector, report_date: str) -> list[str]:
-    """取前四类基金代码"""
+    """取前四类基金主代码（排除A/C/B/I份额重复）"""
     sql = """
-    SELECT DISTINCT c_fd_code FROM tytdata.tb_fd_category
-    WHERE c_type1_code IN ('001','002','003','004')
-      AND c_report_date = :report_date
+    SELECT DISTINCT c.c_fd_code FROM tytdata.tb_fd_category c
+    JOIN tytdata.tb_fd_basic_info b ON c.c_fd_code = b.c_fd_code
+    WHERE c.c_type1_code IN ('001','002','003','004')
+      AND c.c_report_date = :report_date
+      AND (b.c_init_code = b.c_fd_code OR b.c_init_code IS NULL)
     """
     df = doris.query(sql, report_date=report_date)
     return df['c_fd_code'].tolist()
