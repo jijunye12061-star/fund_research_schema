@@ -7,10 +7,10 @@
 SELECT
     -- ── 产品基本信息 ──────────────────────────────────────────
     b.c_fd_code,
-    b.c_fd_name,
-    b.c_fd_manager,
-    b.c_fd_manager_years,                        -- 基金经理任职年限
-    b.c_asset_net,                               -- 最新规模（亿元）
+    b.c_short_name                AS c_fd_name,
+    b.c_manager_name,                            -- 基金经理（逗号分隔多人）
+    -- 基金经理任职年限：Oracle 有原始数据，Doris 尚未存储
+    -- 最新规模：temp_fd_scale_from_tytfund 有但为临时表，建议单独建生产表
     cat.c_type1_name,
     cat.c_type2_name,                            -- 投资类型（主动权益/被动指数等）
 
