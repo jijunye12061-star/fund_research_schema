@@ -253,6 +253,12 @@ def _calc_active_deviation(ind_df: pd.DataFrame,
         bm_sector = bm.groupby('sector')['bm_ind_w'].sum()
         bm_sector = bm_sector / bm_sector.sum() * 100
 
+        # 预计算 bm 各板块内行业归一化权重（期内固定，不随基金变化）
+        bm_inds_by_sector: dict[str, pd.Series] = {}
+        for s, grp in bm.groupby('sector'):
+            s_inds = grp.set_index('c_ind_code')['bm_ind_w']
+            bm_inds_by_sector[s] = s_inds / s_inds.sum() * 100 if s_inds.sum() > 0 else s_inds
+
         for fd, fdf in period_ind.groupby('c_fd_code'):
             fund_total = fdf['c_weight'].sum()
             if fund_total <= 0:
@@ -269,6 +275,12 @@ def _calc_active_deviation(ind_df: pd.DataFrame,
             sector_dev = np.mean([abs(fund_sector.get(s, 0) - bm_sector.get(s, 0))
                                   for s in all_sectors])
 
+            # 预计算该基金各板块内行业归一化权重
+            fund_inds_by_sector: dict[str, pd.Series] = {}
+            for s, grp in fdf.groupby('sector'):
+                s_inds = grp.set_index('c_ind_code')['c_weight']
+                fund_inds_by_sector[s] = s_inds / s_inds.sum() * 100 if s_inds.sum() > 0 else s_inds
+
             # 行业偏离（板块内部）
             weighted_ind_dev = 0.0
             sector_weight_sum = 0.0
@@ -277,13 +289,9 @@ def _calc_active_deviation(ind_df: pd.DataFrame,
                 bm_s_w = bm_sector.get(s, 0)
                 if fund_s_w <= 0 and bm_s_w <= 0:
                     continue
-                # 基金该板块内行业分布
-                fund_inds = fdf[fdf['sector'] == s].set_index('c_ind_code')['c_weight']
-                bm_inds = bm[bm['sector'] == s].set_index('c_ind_code')['bm_ind_w']
 
-                # 各自归一化
-                fund_inds_norm = (fund_inds / fund_inds.sum() * 100) if fund_inds.sum() > 0 else fund_inds
-                bm_inds_norm = (bm_inds / bm_inds.sum() * 100) if bm_inds.sum() > 0 else bm_inds
+                fund_inds_norm = fund_inds_by_sector.get(s, pd.Series(dtype=float))
+                bm_inds_norm = bm_inds_by_sector.get(s, pd.Series(dtype=float))
 
                 all_inds = set(fund_inds_norm.index) | set(bm_inds_norm.index)
                 ind_dev = np.mean([abs(fund_inds_norm.get(i, 0) - bm_inds_norm.get(i, 0))
@@ -317,9 +325,12 @@ def _calc_new_stk_ratio(full_df: pd.DataFrame, report_date: str) -> pd.DataFrame
     t_df = full_df[full_df['c_report_date'] == rd_ts]
     hist_df = full_df[full_df['c_report_date'] < rd_ts]
 
+    # 预先按基金分组历史持仓，避免循环内重复过滤整个 hist_df
+    hist_stk_by_fd = hist_df.groupby('c_fd_code')['c_stk_code'].agg(set)
+
     records = []
     for fd, t_group in t_df.groupby('c_fd_code'):
-        hist_stk = set(hist_df[hist_df['c_fd_code'] == fd]['c_stk_code'])
+        hist_stk = hist_stk_by_fd.get(fd, set())
         new_stk = t_group[~t_group['c_stk_code'].isin(hist_stk)]
         total = t_group['c_nav_ratio'].sum()
         ratio = float(new_stk['c_nav_ratio'].sum() / total * 100) if total > 0 else 0.0
