@@ -25,6 +25,12 @@ CREATE TABLE tytdata.tb_fd_tag_stk_portfolio
     c_crowd_internal_score      DECIMAL(10,4)  COMMENT '同公司抱团度（公司内个股排名加权均值，仅半年报有值）',
     c_crowd_tag                 VARCHAR(10)    COMMENT '抱团度标签：高抱团/中抱团/低抱团（全市场+同公司排名等权复合，按基金类型）',
 
+    -- 买卖时机
+    c_buy_timing_score          DECIMAL(10,4)  COMMENT '买入时机超额均值(%)：T期持仓T-1假设持有收益×仓位 - 基金实际收益，近4期半年报；>0=右侧买入',
+    c_buy_timing_tag            VARCHAR(20)    COMMENT '买入时机标签：右侧买入/左侧买入',
+    c_sell_timing_score         DECIMAL(10,4)  COMMENT '卖出时机超额均值(%)：T期持仓T+1假设持有收益×仓位 - 基金实际收益，近3期半年报（避免未来信息）；>0=左侧卖出',
+    c_sell_timing_tag           VARCHAR(20)    COMMENT '卖出时机标签：左侧卖出/右侧卖出',
+
     -- 交易特征
     c_turnover_avg              DECIMAL(10,4)  COMMENT '基金换手率均值（倍，近4期半年报均值）',
     c_turnover_tag              VARCHAR(10)    COMMENT '换手率标签：高换手/中换手/低换手（按基金类型）',

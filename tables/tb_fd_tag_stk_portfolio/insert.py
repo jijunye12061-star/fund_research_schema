@@ -43,6 +43,8 @@ OUTPUT_COLS = [
     'c_active_sector', 'c_active_ind', 'c_active_sector_rank', 'c_active_ind_rank', 'c_active_tag',
     'c_new_stk_ratio', 'c_new_stk_tag',
     'c_crowd_score', 'c_crowd_internal_score', 'c_crowd_tag',
+    'c_buy_timing_score', 'c_buy_timing_tag',
+    'c_sell_timing_score', 'c_sell_timing_tag',
     'c_turnover_avg', 'c_turnover_tag',
     'c_heavy_retain_rate', 'c_heavy_turnover', 'c_heavy_hold_period',
     'c_heavy_trade_rank', 'c_heavy_trade_tag',
@@ -550,6 +552,147 @@ def _calc_crowd_scores(doris: DorisConnector, fund_codes: list[str],
     return mkt.merge(internal, on='c_fd_code', how='outer')
 
 
+# ==================== 买卖时机 ====================
+
+def _query_stk_cum_returns(doris: DorisConnector, stk_codes: list[str],
+                            start_td: str, end_td: str) -> pd.DataFrame:
+    """股票在 (start_td, end_td] 区间的累计收益率（小数）"""
+    sql = """
+    SELECT c_stk_code,
+           EXP(SUM(LN(1 + GREATEST(c_pct_chg, -99.0) / 100))) - 1 AS cum_ret
+    FROM tytdata.tb_stk_quote_daily
+    WHERE c_stk_code IN (:code_list)
+      AND c_trade_date > :start_td
+      AND c_trade_date <= :end_td
+    GROUP BY c_stk_code
+    """
+    return doris.query_batch(sql, code_list=stk_codes, start_td=start_td, end_td=end_td)
+
+
+def _query_fund_period_ret(doris: DorisConnector, fund_codes: list[str],
+                            start_td: str, end_td: str) -> pd.DataFrame:
+    """基金在 (start_td, end_td] 的区间收益率（小数），从 c_nav_adj 计算"""
+    sql_end = """
+    SELECT c_fd_code, c_nav_adj AS nav_end
+    FROM tytdata.tb_fd_nav_daily
+    WHERE c_fd_code IN (:code_list) AND c_trade_date = :td
+    """
+    sql_start = """
+    SELECT c_fd_code, c_nav_adj AS nav_start
+    FROM tytdata.tb_fd_nav_daily
+    WHERE c_fd_code IN (:code_list) AND c_trade_date = :td
+    """
+    df_end = doris.query_batch(sql_end, code_list=fund_codes, td=end_td)
+    df_start = doris.query_batch(sql_start, code_list=fund_codes, td=start_td)
+    merged = df_end.merge(df_start, on='c_fd_code', how='inner')
+    merged['fund_ret'] = merged['nav_end'] / merged['nav_start'] - 1
+    return merged[['c_fd_code', 'fund_ret']]
+
+
+def _query_equity_ratio(doris: DorisConnector, fund_codes: list[str],
+                         report_date: str) -> pd.DataFrame:
+    """基金在报告期的股票仓位（小数）"""
+    sql = """
+    SELECT c_fd_code, MAX(c_stk_total_ratio) / 100 AS equity_ratio
+    FROM tytdata.tb_fd_asset_allocation
+    WHERE c_fd_code IN (:code_list)
+      AND c_report_date = :report_date
+      AND c_style IN ('02', '04')
+    GROUP BY c_fd_code
+    """
+    return doris.query_batch(sql, code_list=fund_codes, report_date=report_date)
+
+
+def _calc_port_rets(holdings: pd.DataFrame, stk_rets: pd.DataFrame) -> pd.DataFrame:
+    """持仓股票按 c_nav_ratio 归一化加权的收益率"""
+    df = holdings.merge(stk_rets, on='c_stk_code', how='inner')
+    df['wt_ret'] = df['c_nav_ratio'] * df['cum_ret']
+    g = df.groupby('c_fd_code').agg(wt=('wt_ret', 'sum'), w=('c_nav_ratio', 'sum'))
+    return (g['wt'] / g['w'].replace(0.0, np.nan)).rename('port_ret').reset_index()
+
+
+def _calc_timing_scores(doris: DorisConnector, fund_codes: list[str],
+                         report_date: str) -> pd.DataFrame:
+    """买入/卖出时机超额均值(%)
+
+    买入超额(T) = R_持仓组合(T-1→T) × 股票仓位(T-1) − R_基金(T-1→T)，近4期均值
+    卖出超额(T) = R_持仓组合(T→T+1) × 股票仓位(T) − R_基金(T→T+1)，近3期均值（T-3~T-1，避免未来信息）
+    """
+    all_semi = [d for d in generate_report_dates(report_date, 16)
+                if d[5:] in ('06-30', '12-31')]
+    semi = all_semi[-1]
+
+    # 需要5个连续半年报期：[T-4, T-3, T-2, T-1, T]
+    semi_5 = [d for d in generate_report_dates(semi, 10)
+              if d[5:] in ('06-30', '12-31')][:5]
+    if len(semi_5) < 5:
+        return pd.DataFrame(columns=['c_fd_code', 'c_buy_timing_score', 'c_sell_timing_score'])
+
+    # 一次性拉全部持仓
+    all_holdings = _query_full_stk(doris, fund_codes, semi_5)
+    all_holdings['c_report_date'] = pd.to_datetime(all_holdings['c_report_date'])
+
+    # 缓存交易日（报告期→实际交易日）
+    trade_dates = {d: _get_trade_date(doris, d) for d in semi_5}
+
+    buy_records, sell_records = [], []
+
+    # 买入时机：4个区间（semi_5[0→1], [1→2], [2→3], [3→4]）
+    for i in range(1, 5):
+        t_prev, t = semi_5[i - 1], semi_5[i]
+        td_prev, td_t = trade_dates[t_prev], trade_dates[t]
+        holdings_t = all_holdings[all_holdings['c_report_date'] == pd.Timestamp(t)]
+        if holdings_t.empty:
+            continue
+        stk_rets = _query_stk_cum_returns(doris, holdings_t['c_stk_code'].unique().tolist(), td_prev, td_t)
+        port_rets = _calc_port_rets(holdings_t, stk_rets)
+        fund_rets = _query_fund_period_ret(doris, fund_codes, td_prev, td_t)
+        eq_ratio = _query_equity_ratio(doris, fund_codes, t_prev)
+        df = (port_rets.merge(fund_rets, on='c_fd_code', how='inner')
+                       .merge(eq_ratio, on='c_fd_code', how='inner'))
+        df['excess'] = df['port_ret'] * df['equity_ratio'] - df['fund_ret']
+        buy_records.append(df[['c_fd_code', 'excess']])
+
+    # 卖出时机：3个区间（semi_5[1→2], [2→3], [3→4]），不含最新期 [4→?] 避免未来信息
+    for i in range(1, 4):
+        t, t_next = semi_5[i], semi_5[i + 1]
+        td_t, td_next = trade_dates[t], trade_dates[t_next]
+        holdings_t = all_holdings[all_holdings['c_report_date'] == pd.Timestamp(t)]
+        if holdings_t.empty:
+            continue
+        stk_rets = _query_stk_cum_returns(doris, holdings_t['c_stk_code'].unique().tolist(), td_t, td_next)
+        port_rets = _calc_port_rets(holdings_t, stk_rets)
+        fund_rets = _query_fund_period_ret(doris, fund_codes, td_t, td_next)
+        eq_ratio = _query_equity_ratio(doris, fund_codes, t)
+        df = (port_rets.merge(fund_rets, on='c_fd_code', how='inner')
+                       .merge(eq_ratio, on='c_fd_code', how='inner'))
+        df['excess'] = df['port_ret'] * df['equity_ratio'] - df['fund_ret']
+        sell_records.append(df[['c_fd_code', 'excess']])
+
+    def _avg(records: list, col: str) -> pd.DataFrame:
+        if not records:
+            return pd.DataFrame(columns=['c_fd_code', col])
+        return (pd.concat(records, ignore_index=True)
+                  .groupby('c_fd_code')['excess'].mean()
+                  .mul(100).round(4).rename(col).reset_index())
+
+    return _avg(buy_records, 'c_buy_timing_score').merge(
+        _avg(sell_records, 'c_sell_timing_score'), on='c_fd_code', how='outer'
+    )
+
+
+def _assign_timing_tags(result: pd.DataFrame) -> None:
+    """买入/卖出时机标签：绝对0轴阈值（原地修改）"""
+    result['c_buy_timing_tag'] = np.where(
+        result['c_buy_timing_score'].isna(), None,
+        np.where(result['c_buy_timing_score'] > 0, '右侧买入', '左侧买入')
+    )
+    result['c_sell_timing_tag'] = np.where(
+        result['c_sell_timing_score'].isna(), None,
+        np.where(result['c_sell_timing_score'] > 0, '左侧卖出', '右侧卖出')
+    )
+
+
 def _assign_crowd_tag(result: pd.DataFrame, fund_types: pd.DataFrame) -> None:
     """全市场+同公司排名等权复合，按基金类型70%/30%阈值打抱团标签（原地修改）"""
     df = _merge_types(result, fund_types)
@@ -602,11 +745,14 @@ def run(calc_date: str) -> None:
 
         turnover = _calc_turnover(doris, fund_codes, report_date)
         crowd = _calc_crowd_scores(doris, fund_codes, report_date)
+        timing = _calc_timing_scores(doris, fund_codes, report_date)
         result = result.merge(turnover, on='c_fd_code', how='left')
         result = result.merge(crowd, on='c_fd_code', how='left')
+        result = result.merge(timing, on='c_fd_code', how='left')
 
         _assign_turnover_tag(result, fund_types)
         _assign_crowd_tag(result, fund_types)
+        _assign_timing_tags(result)
 
         result['c_report_date'] = pd.to_datetime(report_date)
         doris.insert('tb_fd_tag_stk_portfolio', result[OUTPUT_COLS])

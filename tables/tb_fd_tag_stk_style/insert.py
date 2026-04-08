@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 ENV = 'dev'
 
-FACTOR_CODES = ['VALUE', 'GROWTH', 'MOMENTUM', 'PROF', 'QUALITY']
+FACTOR_CODES = ['VALUE', 'GROWTH', 'MOMENTUM', 'PROF', 'QUALITY', 'DTOP']
 
 OUTPUT_COLS = [
     'c_report_date', 'c_fd_code',
@@ -36,6 +36,7 @@ OUTPUT_COLS = [
     'c_momentum_score', 'c_momentum_tag',
     'c_profit_score', 'c_profit_tag',
     'c_quality_score', 'c_quality_tag',
+    'c_dividend_score', 'c_dividend_tag',
 ]
 
 
@@ -93,7 +94,7 @@ def _query_factors(doris: DorisConnector, trade_date: str) -> pd.DataFrame:
     SELECT c_stk_code, c_factor_code, c_factor_value
     FROM tytdata.tb_stk_risk_factor
     WHERE c_trade_date = :d
-      AND c_factor_code IN ('VALUE','GROWTH','MOMENTUM','PROF','QUALITY')
+      AND c_factor_code IN ('VALUE','GROWTH','MOMENTUM','PROF','QUALITY','DTOP')
     """
     df = doris.query(sql, d=trade_date)
     pivot = df.pivot(index='c_stk_code', columns='c_factor_code',
@@ -193,6 +194,7 @@ def _assign_relative_tags(result: pd.DataFrame, hk_funds: set) -> None:
         ('c_momentum_score', 'c_momentum_tag', '高动量', '中动量', '低动量'),
         ('c_profit_score',   'c_profit_tag',   '高盈利', '中盈利', '低盈利'),
         ('c_quality_score',  'c_quality_tag',  '高质量', '中质量', '低质量'),
+        ('c_dividend_score', 'c_dividend_tag', '高股息', '中股息', '低股息'),
     ]
     for score_col, tag_col, high, mid, low in tag_config:
         valid = result.loc[non_hk, score_col].dropna()
@@ -237,7 +239,7 @@ def run(calc_date: str) -> None:
             'size_score': 'c_size_score',
             'value_score': 'c_value_score', 'growth_score': 'c_growth_score',
             'momentum_score': 'c_momentum_score', 'prof_score': 'c_profit_score',
-            'quality_score': 'c_quality_score',
+            'quality_score': 'c_quality_score', 'dtop_score': 'c_dividend_score',
         }, inplace=True)
 
         # 均值阈值
