@@ -27,8 +27,6 @@ with OracleConnector(env='dev') as oracle:
 
 - 上下文管理器自动管理连接生命周期
 - `query_batch()` 处理大 IN 子句，自动分批（默认 450/批）
-- LOB 字段（CLOB/NCLOB）需在连接关闭前读取，按类型检测而非逐字段检查
-- `cursor.arraysize = 10000` 提升批量读取性能
 
 ### DorisConnector
 
@@ -47,13 +45,8 @@ with DorisConnector(env='dev') as doris:
 
 ## Stream Load 细节
 
-```
-代码 → FE节点(8030) → 307重定向 → BE节点 → 写入
-```
-
-- 格式：JSON（已移除 CSV 支持）
+- 格式：JSON，50k 行/批
 - `strip_outer_array: true`，`strict_mode: true`
-- 307 重定向需手动处理（`allow_redirects=False`）
 - 失败直接抛 `RuntimeError`（研究环境直接报错原则）
 
 ## 配置管理
@@ -104,15 +97,8 @@ jjy/
 ### 日期参数
 
 - DS 传入格式：`%Y%m%d`（如 `20260106`）
-- 脚本内部统一使用：`%Y-%m-%d`
-- 在 `__main__` 入口处转换：
-
-```python
-if __name__ == '__main__':
-    biz_date = sys.argv[1] if len(sys.argv) > 1 else '20260106'
-    biz_date = parse_biz_date(biz_date)  # → 'YYYY-MM-DD'
-    run(biz_date)
-```
+- 脚本内部统一使用：`%Y-%m-%d`，在 `__main__` 入口处用 `parse_biz_date()` 转换
+- 完整的 `__main__` 模板（含 `should_run` 和补数循环）见 [调度指南](scheduling-guide.md)
 
 ## 新表数据验证工作流
 
@@ -172,11 +158,6 @@ FROM tytdata.tb_xxx WHERE c_report_date = '...'
 - 衍生表计算优先从 Doris 取数据源（OLAP 查询更快，不影响 Oracle 生产库）
 - 频繁使用的 Oracle 表应同步到 Doris
 - 小表、低频字典表可直接 Oracle 查
-
-### 并发注意事项
-
-- Doris 并发写 + 读可能 OOM，回填期间串行处理
-- 回填时使用动态时间过滤（批次中最早基金成立日），而非固定回看窗口
 
 ### 权限约束
 
