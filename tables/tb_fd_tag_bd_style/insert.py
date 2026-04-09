@@ -34,7 +34,7 @@ from typing import List
 import numpy as np
 import pandas as pd
 from utils.db_connector import DorisConnector
-from utils.common import generate_report_dates, get_last_quarter_end
+from utils.common import generate_report_dates
 from utils.log import setup_logger
 logger = setup_logger(__name__)
 
@@ -425,9 +425,8 @@ def _build_result(bond_type_df: pd.DataFrame,
 # ============================================================
 # 主入口
 # ============================================================
-def run(calc_date: str):
-    """主入口，由调度平台调用"""
-    report_date = get_last_quarter_end(calc_date)
+def run(report_date: str) -> None:
+    """主入口，report_date 为报告期如 '2025-12-31'"""
     logger.info(f"开始生成 {report_date} 债券投资风格标签")
 
     # 生成回溯日期
@@ -508,9 +507,14 @@ def run(calc_date: str):
 
 
 if __name__ == '__main__':
-    from utils.common import generate_report_dates
-    backfill_report_dates = generate_report_dates('2025-12-31', 41)
-    for backfill_report_date in backfill_report_dates:
-        run(backfill_report_date)
-    # biz_date_str = '2026-02-24'
-    # run(biz_date_str)
+    from utils.common import should_run, ReportFreq
+    if len(sys.argv) > 1:
+        raw = sys.argv[1]
+        calc_date = f'{raw[:4]}-{raw[4:6]}-{raw[6:]}'
+        ok, report_date = should_run(calc_date, ReportFreq.QUARTERLY)
+        if ok:
+            run(report_date)
+    else:
+        # 历史補数：2016-12-31 起，36 期季度
+        for dt in generate_report_dates('2025-12-31', 36):
+            run(dt)

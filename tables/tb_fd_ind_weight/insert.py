@@ -20,7 +20,6 @@ _setup_path()
 import logging
 import pandas as pd
 from utils.db_connector import DorisConnector
-from utils.common import get_last_quarter_end
 
 from utils.log import setup_logger
 logger = setup_logger(__name__)
@@ -115,9 +114,9 @@ def _calc_weights(holdings: pd.DataFrame, total_mv: pd.DataFrame) -> pd.DataFram
     return result[['c_fd_code', 'c_ind_code', 'c_weight']]
 
 
-def run(calc_date: str) -> None:
-    """主入口，calc_date为报告期，如 '2024-06-30'"""
-    report_date = get_last_quarter_end(calc_date)
+def run(report_date: str) -> None:
+    """主入口，report_date 须为半年报期：'2024-06-30' 或 '2024-12-31'"""
+    assert report_date[5:] in ('06-30', '12-31'), "report_date 必须为半年报期"
     logger.info(f"开始计算 {report_date} 行业持仓权重")
 
     with DorisConnector(ENV) as doris:
@@ -137,7 +136,14 @@ def run(calc_date: str) -> None:
 
 
 if __name__ == '__main__':
-    from utils.common import generate_report_dates
-    main_trade_dates = generate_report_dates('2025-12-31', 42)[::2]
-    for dt in main_trade_dates:
-        run(dt)
+    from utils.common import generate_report_dates, should_run, ReportFreq
+    if len(sys.argv) > 1:
+        raw = sys.argv[1]
+        calc_date = f'{raw[:4]}-{raw[4:6]}-{raw[6:]}'
+        ok, report_date = should_run(calc_date, ReportFreq.SEMI_ANNUAL)
+        if ok:
+            run(report_date)
+    else:
+        # 历史補数：2015-06-30 起，21 期半年报
+        for dt in generate_report_dates('2025-12-31', 42)[::2]:
+            run(dt)

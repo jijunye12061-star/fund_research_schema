@@ -166,8 +166,12 @@ def run(calc_date: str, events: pd.DataFrame = None) -> None:
 
 
 if __name__ == '__main__':
-    # sync_dict()
-    main_events = _query_events('2026-03-20')
-    for dt in get_trade_calendar('2021-06-30', '2026-03-20'):
-        run(dt.strftime('%Y-%m-%d'), main_events)
-    # run('2026-03-20')
+    if len(sys.argv) > 1:
+        raw = sys.argv[1]
+        run(f'{raw[:4]}-{raw[4:6]}-{raw[6:]}')
+    else:
+        run('2026-04-09')  # 单日手动触发
+        # 历史补数（按需运行）：
+        # main_events = _query_events('2026-04-09')
+        # for dt in get_trade_calendar('2015-01-05', '2026-04-09'):
+        #     run(dt.strftime('%Y-%m-%d'), main_events)

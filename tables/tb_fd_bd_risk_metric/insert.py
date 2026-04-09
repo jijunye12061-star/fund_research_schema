@@ -6,12 +6,34 @@
 @Author: 季俊晔
 @Project: fund_research_db
 """
+import sys
+from pathlib import Path
+
+
+def _setup_path():
+    """兼容本地和DS环境的路径适配"""
+    for parent in Path(__file__).resolve().parents:
+        if (parent / 'utils' / 'db_connector.py').exists():
+            sys.path.insert(0, str(parent))
+            return
+    ds_resource = Path("dolphinscheduler/default/resources/jjy")
+    if (ds_resource / 'utils' / 'db_connector.py').exists():
+        sys.path.insert(0, str(ds_resource))
+        return
+    raise RuntimeError("找不到 utils 目录，请检查路径配置")
+
+
+_setup_path()
+
 import logging
 import pandas as pd
 from typing import List
 
 from utils.db_connector import OracleConnector, DorisConnector
-from utils.common import ENV
+
+# ============================================================
+ENV = 'dev'  # 切换环境: 'dev' | 'prod'
+# ============================================================
 
 logger = logging.getLogger(__name__)
 
@@ -29,16 +51,6 @@ UNRATED_FIELD_MAP = {
 }
 
 ALL_MV_FIELDS = list(RATING_FIELD_MAP.values()) + list(UNRATED_FIELD_MAP.values())
-
-
-# ==================== 工具函数 ====================
-
-def _get_last_half_year_end(calc_date: str) -> str:
-    """获取上一个半年末日期(06-30或12-31)"""
-    dt = pd.to_datetime(calc_date)
-    if dt.month > 6:
-        return f"{dt.year}-06-30"
-    return f"{dt.year - 1}-12-31"
 
 
 # ==================== 数据查询 ====================
@@ -174,9 +186,9 @@ def _calc_duration(df: pd.DataFrame) -> pd.DataFrame:
 
 # ==================== 主函数 ====================
 
-def run(calc_date: str):
-    """主入口"""
-    report_date = _get_last_half_year_end(calc_date)
+def run(report_date: str) -> None:
+    """主入口，report_date 须为半年报期：'2024-06-30' 或 '2024-12-31'"""
+    assert report_date[5:] in ('06-30', '12-31'), "report_date 必须为半年报期"
     logger.info(f"计算 {report_date} 债券信用久期指标")
 
     fund_codes = _get_fund_codes(report_date)
@@ -213,7 +225,14 @@ def run(calc_date: str):
 
 
 if __name__ == '__main__':
-    from utils.common import generate_report_dates
-    report_dates = generate_report_dates('2025-06-30', 40)
-    for report_date in report_dates[::2]:
-        run(report_date)
+    from utils.common import generate_report_dates, should_run, ReportFreq
+    if len(sys.argv) > 1:
+        raw = sys.argv[1]
+        calc_date = f'{raw[:4]}-{raw[4:6]}-{raw[6:]}'
+        ok, report_date = should_run(calc_date, ReportFreq.SEMI_ANNUAL)
+        if ok:
+            run(report_date)
+    else:
+        # 历史補数：2015-06-30 起，21 期半年报
+        for dt in generate_report_dates('2025-12-31', 42)[::2]:
+            run(dt)

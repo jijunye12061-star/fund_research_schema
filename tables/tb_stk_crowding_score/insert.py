@@ -134,10 +134,14 @@ def run(calc_date: str) -> None:
 
 
 if __name__ == '__main__':
+    from utils.common import should_run, ReportFreq
     if len(sys.argv) > 1:
         raw = sys.argv[1]
-        run(f'{raw[:4]}-{raw[4:6]}-{raw[6:]}')
+        calc_date = f'{raw[:4]}-{raw[4:6]}-{raw[6:]}'
+        ok, report_date = should_run(calc_date, ReportFreq.SEMI_ANNUAL)
+        if ok:
+            run(report_date)
     else:
-        # 历史补数：从 2015-12-31 起（项目数据起点）
-        for dt in [d for d in _semi_annual_dates('2025-12-31', 40) if d >= '2015-12-31']:
+        # 历史補数：2015-06-30 起，21 期半年报
+        for dt in [d for d in _semi_annual_dates('2025-12-31', 42) if d >= '2015-06-30']:
             run(dt)

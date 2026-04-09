@@ -473,6 +473,6 @@ if __name__ == '__main__':
         if ok:
             run(report_date)
     else:
-        # 历史补数：2015-06-30 起，42 期季度
-        for dt in generate_report_dates('2025-12-31', 42):
+        # 历史補数：2016-12-31 起，36 期季度
+        for dt in generate_report_dates('2025-12-31', 36):
             run(dt)

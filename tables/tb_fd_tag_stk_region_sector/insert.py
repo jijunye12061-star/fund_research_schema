@@ -218,6 +218,16 @@ def run(calc_date: str) -> None:
 
 
 if __name__ == '__main__':
-    main_trade_dates = generate_report_dates('2025-12-31', 41)
-    for dt in main_trade_dates:
-        run(dt)
+    from utils.common import should_run, ReportFreq
+    if len(sys.argv) > 1:
+        raw = sys.argv[1]
+        calc_date = f'{raw[:4]}-{raw[4:6]}-{raw[6:]}'
+        ok, report_date = should_run(calc_date, ReportFreq.QUARTERLY)
+        if not ok:
+            ok, report_date = should_run(calc_date, ReportFreq.SEMI_ANNUAL)
+        if ok:
+            run(report_date)
+    else:
+        # 历史補数：2016-12-31 起，36 期季度
+        for dt in generate_report_dates('2025-12-31', 36):
+            run(dt)
