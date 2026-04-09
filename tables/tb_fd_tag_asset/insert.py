@@ -40,7 +40,7 @@ from typing import List, Optional
 import numpy as np
 import pandas as pd
 from utils.db_connector import DorisConnector
-from utils.common import generate_report_dates, get_last_quarter_end
+from utils.common import generate_report_dates
 from utils.log import setup_logger
 logger = setup_logger(__name__)
 
@@ -430,14 +430,12 @@ class MixedFundTagAsset(BaseFundTagAsset):
 
 
 # ============================================================
-def run(calc_date: str):
+def run(report_date: str):
     """基金资产配置标签生成 - 按季度定期执行
 
     Args:
-        calc_date: 执行日期,如 '2025-01-31' 会更新上季度(2024-12-31)标签
+        report_date: 报告期，如 '2025-12-31'
     """
-    # 确定要更新的报告期
-    report_date = get_last_quarter_end(calc_date)
     logger.info(f"开始生成 {report_date} 季度的基金资产配置标签")
 
     # 权益基金标签
@@ -465,10 +463,16 @@ def run(calc_date: str):
     return eq_results, fi_results, mix_results
 
 
-if __name__ == "__main__":
-    biz_date_str = '2026-02-24'
-    # biz_date_str = "${biz_date}"
-    # if len(biz_date_str) == 8:
-    #     biz_date_str = pd.to_datetime(biz_date_str, format='%Y%m%d').strftime('%Y-%m-%d')
-
-    run(biz_date_str)
+if __name__ == '__main__':
+    import sys
+    from utils.common import should_run, ReportFreq
+    if len(sys.argv) > 1:
+        raw = sys.argv[1]
+        calc_date = f'{raw[:4]}-{raw[4:6]}-{raw[6:]}'
+        ok, report_date = should_run(calc_date, ReportFreq.QUARTERLY)
+        if ok:
+            run(report_date)
+    else:
+        # 历史补数：2015-06-30 起，42 期季度
+        for dt in generate_report_dates('2025-12-31', 42):
+            run(dt)

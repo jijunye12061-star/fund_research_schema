@@ -30,7 +30,7 @@ _setup_path()
 import pandas as pd
 from datetime import timedelta
 from typing import Dict, List, Optional
-from utils.common import generate_report_dates, get_last_quarter_end
+from utils.common import generate_report_dates
 from dataclasses import dataclass
 from enum import Enum
 
@@ -514,15 +514,12 @@ class FundClassifier:
                  avg_ratio <= self.config.debt_equity_max_avg))
 
 
-def run(calc_date: str):
+def run(report_date: str):
     """基金分类更新 - 按季度定期执行
 
     Args:
-        calc_date: 执行日期,如 '2025-01-31' 会更新上季度(2024-12-31)分类
+        report_date: 报告期，如 '2025-12-31'
     """
-    # 确定要更新的报告期
-    report_date = get_last_quarter_end(calc_date)
-
     logger.info(f"开始更新 {report_date} 季度的基金分类")
 
     # 执行分类
@@ -541,6 +538,16 @@ def run(calc_date: str):
     logger.info(f"完成 {len(results)} 只基金的分类更新")
     return results
 
-# 使用示例
-if __name__ == "__main__":
-    run('2026-02-11')
+if __name__ == '__main__':
+    import sys
+    from utils.common import should_run, ReportFreq
+    if len(sys.argv) > 1:
+        raw = sys.argv[1]
+        calc_date = f'{raw[:4]}-{raw[4:6]}-{raw[6:]}'
+        ok, report_date = should_run(calc_date, ReportFreq.QUARTERLY)
+        if ok:
+            run(report_date)
+    else:
+        # 历史补数：2015-03-31 起，43 期季度
+        for dt in generate_report_dates('2025-12-31', 43):
+            run(dt)

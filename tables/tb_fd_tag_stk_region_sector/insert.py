@@ -218,8 +218,6 @@ def run(calc_date: str) -> None:
 
 
 if __name__ == '__main__':
-    from utils.common import generate_report_dates
-
     main_trade_dates = generate_report_dates('2025-12-31', 41)
     for dt in main_trade_dates:
         run(dt)

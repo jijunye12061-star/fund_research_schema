@@ -343,9 +343,9 @@ def run(calc_date: str):
 
 
 if __name__ == '__main__':
-    biz_date_str = '2026-02-24'
-    # biz_date_str = "${biz_date}"
-    # if len(biz_date_str) == 8:
-    #     biz_date_str = pd.to_datetime(biz_date_str, format='%Y%m%d').strftime('%Y-%m-%d')
-
-    run(biz_date_str)
+    import sys
+    if len(sys.argv) > 1:
+        raw = sys.argv[1]
+        run(f'{raw[:4]}-{raw[4:6]}-{raw[6:]}')
+    else:
+        run('2026-04-09')  # 单日手动触发，无补数循环
