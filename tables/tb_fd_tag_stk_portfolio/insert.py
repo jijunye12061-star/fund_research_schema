@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 import yaml
 from utils.db_connector import DorisConnector
-from utils.common import generate_report_dates
+from utils.common import generate_report_dates, should_run, ReportFreq
 from utils.log import setup_logger, step
 
 logger = setup_logger(__name__)
@@ -95,50 +95,36 @@ def _query_ind_weight(doris: DorisConnector, fund_codes: list[str],
 
 def _query_heavy_stk(doris: DorisConnector, fund_codes: list[str],
                      periods: list[str]) -> pd.DataFrame:
-    """查询近8期季报重仓股（前10大持股）
-    c_style: 01=一季报, 03=三季报, 05=半年报重仓, 06=年报重仓"""
+    """查询近8期季报重仓股（前10大持股），按标准季报末日逐期查避免带入基金转型等非标准报告期
+    c_style: 01=一季报, 03=三季报, 05=二季报, 06=四季报"""
     sql = """
-    WITH ranked AS (
-        SELECT c_fd_code, c_report_date, c_stk_code, c_nav_ratio,
-               ROW_NUMBER() OVER (
-                   PARTITION BY c_fd_code, c_report_date, c_stk_code ORDER BY c_style
-               ) AS rn
-        FROM tytdata.tb_fd_portfolio_stk
-        WHERE c_fd_code IN (:code_list)
-          AND c_report_date BETWEEN :start_date AND :end_date
-          AND c_style IN ('01','03','05','06')
-          AND c_nav_ratio > 0
-    )
     SELECT c_fd_code, c_report_date, c_stk_code, c_nav_ratio
-    FROM ranked WHERE rn = 1
+    FROM tytdata.tb_fd_portfolio_stk
+    WHERE c_fd_code IN (:code_list)
+      AND c_report_date = :report_date
+      AND c_style IN ('01','03','05','06')
+      AND c_nav_ratio > 0
     """
-    df = doris.query_batch(sql, code_list=fund_codes,
-                           start_date=periods[0], end_date=periods[-1])
+    dfs = [doris.query_batch(sql, code_list=fund_codes, report_date=p) for p in periods]
+    df = pd.concat([d for d in dfs if not d.empty], ignore_index=True)
     df['c_report_date'] = pd.to_datetime(df['c_report_date'])
     return df
 
 
 def _query_full_stk(doris: DorisConnector, fund_codes: list[str],
                     periods: list[str]) -> pd.DataFrame:
-    """查询近多期半年报全持仓（用于top10和持股扩新）
+    """查询半年报/年报全持仓（用于持股扩新），按标准半年报末日逐期查
     c_style: 02=半年报, 04=年报"""
     sql = """
-    WITH ranked AS (
-        SELECT c_fd_code, c_report_date, c_stk_code, c_nav_ratio,
-               ROW_NUMBER() OVER (
-                   PARTITION BY c_fd_code, c_report_date, c_stk_code ORDER BY c_style
-               ) AS rn
-        FROM tytdata.tb_fd_portfolio_stk
-        WHERE c_fd_code IN (:code_list)
-          AND c_report_date BETWEEN :start_date AND :end_date
-          AND c_style IN ('02','04')
-          AND c_nav_ratio > 0
-    )
     SELECT c_fd_code, c_report_date, c_stk_code, c_nav_ratio
-    FROM ranked WHERE rn = 1
+    FROM tytdata.tb_fd_portfolio_stk
+    WHERE c_fd_code IN (:code_list)
+      AND c_report_date = :report_date
+      AND c_style IN ('02','04')
+      AND c_nav_ratio > 0
     """
-    df = doris.query_batch(sql, code_list=fund_codes,
-                           start_date=periods[0], end_date=periods[-1])
+    dfs = [doris.query_batch(sql, code_list=fund_codes, report_date=p) for p in periods]
+    df = pd.concat([d for d in dfs if not d.empty], ignore_index=True)
     df['c_report_date'] = pd.to_datetime(df['c_report_date'])
     return df
 
@@ -215,11 +201,14 @@ def _calc_ind_concentration(ind_df: pd.DataFrame) -> pd.DataFrame:
     return avg.rename(columns={'hhi': 'c_ind_hhi', 'top5': 'c_ind_top5_ratio'})
 
 
-def _calc_top10_ratio(heavy_df: pd.DataFrame) -> pd.DataFrame:
-    """前10大持股权重（季报重仓股权重之和），近8期季报均值"""
-    per_period = (heavy_df.groupby(['c_fd_code', 'c_report_date'])['c_nav_ratio']
-                          .sum().reset_index(name='top10'))
-    return (per_period.groupby('c_fd_code')['top10']
+def _calc_top10_ratio(heavy_df: pd.DataFrame, equity_df: pd.DataFrame) -> pd.DataFrame:
+    """前10大持股占股票仓位比例（归一化），近8期季报均值
+    top10_nav / equity_ratio → 前十大占股票仓位的%，消除仓位高低的影响"""
+    per_period = heavy_df.groupby(['c_fd_code', 'c_report_date'])['c_nav_ratio'].sum().reset_index(name='top10')
+    per_period = per_period.merge(equity_df, on=['c_fd_code', 'c_report_date'], how='left')
+    # top10单位已是%(占净值)，equity_ratio是小数，两者相除得占股票仓位的%
+    per_period['top10_norm'] = per_period['top10'] / (per_period['equity_ratio'] * 100)
+    return (per_period.groupby('c_fd_code')['top10_norm']
                       .mean().round(4).rename('c_top10_ratio').reset_index())
 
 
@@ -302,13 +291,20 @@ def _calc_active_deviation(ind_df: pd.DataFrame,
 
 def _calc_new_stk_ratio(full_df: pd.DataFrame, report_date: str) -> pd.DataFrame:
     """持股扩新：T期全持仓中未出现在T-1~T-3期的合计权重
-    仅当 report_date 为半年报期（06-30/12-31）时计算"""
-    if report_date[5:] not in ('06-30', '12-31'):
-        return pd.DataFrame(columns=['c_fd_code', 'c_new_stk_ratio', 'c_new_stk_tag'])
 
+    季报期或中报未出时，前向填充最近有数据的半年报期；中报/年报出后重跑覆盖(UNIQUE KEY)。
+    披露节奏：06-30 会被调度两次——07-31 二季报出（full_df 无 06-30 → 回退到 12-31），
+    08-31 中报出（full_df 有 06-30 → 正常计算覆盖）。12-31/年报 同理。
+    """
+    available = sorted(full_df['c_report_date'].unique())
+    if not available:
+        return pd.DataFrame(columns=['c_fd_code', 'c_new_stk_ratio', 'c_new_stk_tag'])
+    # T = report_date（若有数据）或 full_df 中最近有数据的半年报期
     rd_ts = pd.Timestamp(report_date)
-    t_df = full_df[full_df['c_report_date'] == rd_ts]
-    hist_df = full_df[full_df['c_report_date'] < rd_ts]
+    t_date = rd_ts if rd_ts in available else available[-1]
+    t_df = full_df[full_df['c_report_date'] == t_date]
+    prior_3 = [p for p in available if p < t_date][-3:]
+    hist_df = full_df[full_df['c_report_date'].isin(prior_3)]
 
     # 预先按基金分组历史持仓，避免循环内重复过滤整个 hist_df
     hist_stk_by_fd = hist_df.groupby('c_fd_code')['c_stk_code'].agg(set)
@@ -605,6 +601,22 @@ def _query_fund_period_ret(doris: DorisConnector, fund_codes: list[str],
     return merged[['c_fd_code', 'fund_ret']]
 
 
+def _query_equity_ratio_periods(doris: DorisConnector, fund_codes: list[str],
+                                 periods: list[str]) -> pd.DataFrame:
+    """查询各季报期股票仓位（小数），用于top10归一化"""
+    sql = """
+    SELECT c_fd_code, c_report_date, MAX(c_stk_total_ratio) / 100 AS equity_ratio
+    FROM tytdata.tb_fd_asset_allocation
+    WHERE c_fd_code IN (:code_list)
+      AND c_report_date = :report_date
+    GROUP BY c_fd_code, c_report_date
+    """
+    dfs = [doris.query_batch(sql, code_list=fund_codes, report_date=p) for p in periods]
+    df = pd.concat([d for d in dfs if not d.empty], ignore_index=True)
+    df['c_report_date'] = pd.to_datetime(df['c_report_date'])
+    return df
+
+
 def _query_equity_ratio(doris: DorisConnector, fund_codes: list[str],
                          report_date: str) -> pd.DataFrame:
     """基金在报告期的股票仓位（小数）"""
@@ -731,12 +743,13 @@ def run(calc_date: str) -> None:
 
     q_periods = generate_report_dates(report_date, 8)
     s_periods = [d for d in q_periods if d[5:] in ('06-30', '12-31')]
-    # 持股扩新需要 T + T-1~T-3 期半年报，共7期
-    s_periods_ext = [d for d in generate_report_dates(report_date, 14) if d[5:] in ('06-30', '12-31')]
+    # 持股扩新需要 T 期 + T-1~T-3 共4期半年报；8个季报期内恰好覆盖4个半年报期
+    s_periods_ext = [d for d in q_periods if d[5:] in ('06-30', '12-31')]
 
+    t_run = time.perf_counter()
+
+    # ── Phase 1: 批量查询（连接时间短，无长时间空闲）──
     with DorisConnector(ENV) as doris:
-        t_run = time.perf_counter()
-
         with _step("查询: fund_types"):
             fund_types = _get_fund_types(doris, report_date)
             fund_codes = fund_types['c_fd_code'].tolist()
@@ -748,33 +761,39 @@ def run(calc_date: str) -> None:
         with _step("查询: heavy_stk"):
             heavy_df = _query_heavy_stk(doris, fund_codes, q_periods)
 
+        with _step("查询: equity_ratio"):
+            equity_df = _query_equity_ratio_periods(doris, fund_codes, q_periods)
+
         with _step("查询: full_stk"):
             full_df = _query_full_stk(doris, fund_codes, s_periods_ext)
 
         with _step(f"查询: benchmark({len(s_periods)}期)"):
             benchmark = _query_benchmark(doris, s_periods)
 
-        with _step("计算: 集中度指标"):
-            sector_hhi = _calc_sector_hhi(ind_df)
-            ind_conc = _calc_ind_concentration(ind_df)
-            top10 = _calc_top10_ratio(heavy_df)
+    # ── Phase 2: 纯内存计算（不持有连接，避免服务器超时断开）──
+    with _step("计算: 集中度指标"):
+        sector_hhi = _calc_sector_hhi(ind_df)
+        ind_conc = _calc_ind_concentration(ind_df)
+        top10 = _calc_top10_ratio(heavy_df, equity_df)
 
-        with _step("计算: 主动偏离"):
-            active = _calc_active_deviation(ind_df, benchmark)
+    with _step("计算: 主动偏离"):
+        active = _calc_active_deviation(ind_df, benchmark)
 
-        with _step("计算: 持股扩新"):
-            new_stk = _calc_new_stk_ratio(full_df, report_date)
+    with _step("计算: 持股扩新"):
+        new_stk = _calc_new_stk_ratio(full_df, report_date)
 
-        with _step("计算: 重仓交易特征"):
-            heavy = _calc_heavy_trade(heavy_df)
+    with _step("计算: 重仓交易特征"):
+        heavy = _calc_heavy_trade(heavy_df)
 
-        dfs = [sector_hhi, ind_conc, top10, active, new_stk, heavy]
-        result = reduce(lambda l, r: l.merge(r, on='c_fd_code', how='outer'), dfs)
+    dfs = [sector_hhi, ind_conc, top10, active, new_stk, heavy]
+    result = reduce(lambda l, r: l.merge(r, on='c_fd_code', how='outer'), dfs)
 
-        _assign_concentration_tags(result, fund_types)
-        _assign_active_tags(result, fund_types)
-        _assign_trade_tags(result, fund_types)
+    _assign_concentration_tags(result, fund_types)
+    _assign_active_tags(result, fund_types)
+    _assign_trade_tags(result, fund_types)
 
+    # ── Phase 3: 剩余查询 + 写入（重新建立新连接）──
+    with DorisConnector(ENV) as doris:
         with _step("查询+计算: 换手率"):
             turnover = _calc_turnover(doris, fund_codes, report_date)
 
@@ -804,9 +823,20 @@ if __name__ == '__main__':
     import sys as _sys
 
     if len(_sys.argv) > 1:
-        # DS 调度入口：传入 '20250630' 格式
-        raw = _sys.argv[1]
-        run(f'{raw[:4]}-{raw[4:6]}-{raw[6:]}')
+        # DS 调度入口：传入 '20250630' 格式，每日触发，由 should_run 决定是否执行
+        # 调度规则：
+        #   季报触发  (~Q末+15工作日): 更新季报级字段 + 半年报级字段前向填充
+        #   半年报触发(~Q末+60/90日):  重跑同一报告期，补全全持仓字段(持股扩新)，UNIQUE KEY 覆盖
+        calc_date = _sys.argv[1]
+        calc_date = f'{calc_date[:4]}-{calc_date[4:6]}-{calc_date[6:]}'
+
+        ok, report_date = should_run(calc_date, ReportFreq.QUARTERLY)
+        if ok:
+            run(report_date)
+
+        ok, report_date = should_run(calc_date, ReportFreq.SEMI_ANNUAL)
+        if ok:
+            run(report_date)
     else:
         # 历史补数：从2016-03-31起，季度频率
         for dt in generate_report_dates('2025-12-31', 40):
