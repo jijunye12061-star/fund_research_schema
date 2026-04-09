@@ -144,6 +144,6 @@ if __name__ == '__main__':
         if ok:
             run(report_date)
     else:
-        # 历史補数：2015-06-30 起，21 期半年报
-        for dt in generate_report_dates('2025-12-31', 42)[::2]:
+        # 历史補数：2015-06-30 起，22 期半年报
+        for dt in generate_report_dates('2025-12-31', 44)[::2]:
             run(dt)
