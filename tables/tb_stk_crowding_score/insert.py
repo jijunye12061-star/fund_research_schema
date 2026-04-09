@@ -32,14 +32,6 @@ OUTPUT_COLS = [
 ]
 
 
-# ==================== 辅助 ====================
-
-def _semi_annual_dates(calc_date: str, n: int) -> list[str]:
-    """最近 n 个半年报期（含 calc_date 当期，仅 06-30/12-31）"""
-    return [d for d in generate_report_dates(calc_date, n * 2)
-            if d[5:] in ('06-30', '12-31')][:n]
-
-
 # ==================== 数据查询 ====================
 
 def _get_equity_funds(doris: DorisConnector, report_date: str) -> list[str]:
@@ -142,6 +134,6 @@ if __name__ == '__main__':
         if ok:
             run(report_date)
     else:
-        # 历史補数：2015-06-30 起，21 期半年报
-        for dt in [d for d in _semi_annual_dates('2025-12-31', 42) if d >= '2015-06-30']:
+        # 历史補数：2015-06-30 起，22 期半年报
+        for dt in generate_report_dates('2025-12-31', 44)[::2]:
             run(dt)

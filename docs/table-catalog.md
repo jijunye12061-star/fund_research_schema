@@ -60,7 +60,7 @@
 
 | 表名 | 中文名 | 依赖 | 补数起点 | 期数 |
 |------|--------|------|----------|------|
-| tb_fd_category | 基金分类 | tb_fd_basic_info, tb_fd_asset_allocation | 2015-03-31 | 43 期 |
+| tb_fd_category | 基金分类 | tb_fd_basic_info, tb_fd_asset_allocation | 2015-03-31 | 44 期 |
 
 ### 半年度基础（三表可并行）
 
@@ -68,15 +68,15 @@
 
 | 表名 | 中文名 | 依赖 | 补数起点 | 期数 |
 |------|--------|------|----------|------|
-| tb_fd_ind_weight | 基金行业持仓权重 | tb_fd_portfolio_stk, tb_stk_industry, tb_stk_basic_info(_hk), tb_dict_params | 2015-06-30 | 21 期 |
-| tb_fd_turnover | 基金换手率 | tb_fd_portfolio_stk, tb_fd_asset_allocation | 2015-06-30 | 21 期 |
-| tb_fd_bd_risk_metric | 债券信用/久期指标 | tb_fd_portfolio_bd | 2015-06-30 | 21 期 |
+| tb_fd_ind_weight | 基金行业持仓权重 | tb_fd_portfolio_stk, tb_stk_industry, tb_stk_basic_info(_hk), tb_dict_params | 2015-06-30 | 22 期 |
+| tb_fd_turnover | 基金换手率 | tb_fd_portfolio_stk, tb_fd_asset_allocation | 2015-06-30 | 22 期 |
+| tb_fd_bd_risk_metric | 债券信用/久期指标 | tb_fd_portfolio_bd | 2015-06-30 | 22 期 |
 
 ### 半年度中间（依赖以上半年度基础）
 
 | 表名 | 中文名 | 依赖 | 补数起点 | 期数 |
 |------|--------|------|----------|------|
-| tb_stk_crowding_score | 个股抱团度得分 | tb_fd_category, tb_fd_basic_info, tb_fd_portfolio_stk | 2015-06-30 | 21 期 |
+| tb_stk_crowding_score | 个股抱团度得分 | tb_fd_category, tb_fd_basic_info, tb_fd_portfolio_stk | 2015-06-30 | 22 期 |
 
 ---
 

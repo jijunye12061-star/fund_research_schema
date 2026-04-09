@@ -89,11 +89,11 @@ tb_stk_industry_hk, tb_dict_params
 | 层 | 表名 | 频率 | 补数起点 | 期数 |
 |---|------|------|----------|------|
 | 日频 | tb_stk_industry / tb_stk_concept / tb_fd_perform_abs | 日频 | 2015-01-05 | — |
-| 中间层-季度 | tb_fd_category | 季度 | 2015-03-31 | 43 期 |
-| 中间层-半年度 | tb_fd_ind_weight | 半年度 | 2015-06-30 | 21 期 |
-| 中间层-半年度 | tb_fd_turnover | 半年度 | 2015-06-30 | 21 期 |
-| 中间层-半年度 | tb_fd_bd_risk_metric | 半年度 | 2015-06-30 | 21 期 |
-| 中间层-半年度 | tb_stk_crowding_score | 半年度 | 2015-06-30 | 21 期 |
+| 中间层-季度 | tb_fd_category | 季度 | 2015-03-31 | 44 期 |
+| 中间层-半年度 | tb_fd_ind_weight | 半年度 | 2015-06-30 | 22 期 |
+| 中间层-半年度 | tb_fd_turnover | 半年度 | 2015-06-30 | 22 期 |
+| 中间层-半年度 | tb_fd_bd_risk_metric | 半年度 | 2015-06-30 | 22 期 |
+| 中间层-半年度 | tb_stk_crowding_score | 半年度 | 2015-06-30 | 22 期 |
 | 标签层（全部） | tb_fd_tag_asset / tb_fd_tag_bd_style / tb_fd_tag_stk_region_sector / tb_fd_tag_stk_style / tb_fd_tag_stk_portfolio | 综合 | **2016-12-31** | — |
 
 ---
