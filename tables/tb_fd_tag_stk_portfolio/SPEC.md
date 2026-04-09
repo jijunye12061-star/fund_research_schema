@@ -35,7 +35,7 @@
 | `c_ind_hhi` | DECIMAL | 行业HHI：中信一级行业权重平方和/总权重²（0~1），近**4期半年报**均值 |
 | `c_ind_top5_ratio` | DECIMAL | 前5大行业权重占比（%），近**4期半年报**均值 |
 | `c_ind_concent_rank` | DECIMAL | 行业集中度复合排名：(HHI分位排名 + top5分位排名) / 2，按基金类型，0~1 |
-| `c_top10_ratio` | DECIMAL | 前10大持股权重占比（%），近**8期季报**均值（季报有重仓股数据） |
+| `c_top10_ratio` | DECIMAL | 前10大持股**占股票仓位**比例（小数），近**8期季报**均值；= top10占NAV(%) / 股票仓位(%)，归一化消除仓位高低影响 |
 | `c_sector_concent_tag` | VARCHAR | 板块集中度：**集中** / **均衡** / **分散**（c_sector_hhi的70%/30%分位，按类型） |
 | `c_ind_concent_tag` | VARCHAR | 行业集中度：**集中** / **均衡** / **分散**（c_ind_concent_rank的70%/30%分位，按类型） |
 | `c_stk_concent_tag` | VARCHAR | 个股集中度：**集中** / **均衡** / **分散**（c_top10_ratio的70%/30%分位，按类型） |
@@ -49,8 +49,8 @@
 | `c_active_sector_rank` | DECIMAL | 主动板块偏离百分比排名（按基金类型，0~1） |
 | `c_active_ind_rank` | DECIMAL | 主动行业偏离百分比排名（按基金类型，0~1） |
 | `c_active_tag` | VARCHAR | **主动配置**（两者均≥70%）/ **主动板块配置** / **主动行业配置** / 空 |
-| `c_new_stk_ratio` | DECIMAL | 持股扩新（%）：T期全持仓中未出现在T-1~T-3期的合计权重；季报期为NULL |
-| `c_new_stk_tag` | VARCHAR | **积极**（≥50%）/ **适中**（≥20%）/ **保守**（<20%）；季报期为NULL |
+| `c_new_stk_ratio` | DECIMAL | 持股扩新（%）：T期全持仓中未出现在T-1~T-3期的合计权重；季报期前向填充最近半年报期值 |
+| `c_new_stk_tag` | VARCHAR | **积极**（≥50%）/ **适中**（≥20%）/ **保守**（<20%）；季报期前向填充 |
 | `c_crowd_score` | DECIMAL | 全市场抱团度：基金持仓加权的 tb_stk_crowding_score.c_crowd_score_mkt 均值；仅半年报期有值，季报期前向填充 |
 | `c_crowd_internal_score` | DECIMAL | 同公司抱团度：公司内股票持仓市值百分位排名的加权均值；仅半年报期有值，季报期前向填充 |
 | `c_crowd_tag` | VARCHAR | 抱团度标签：**高抱团** / **中抱团** / **低抱团**（全市场+同公司排名等权复合，按基金类型70%/30%分位） |
@@ -85,6 +85,51 @@
 - `c_heavy_retain_rate`：升序排名（留存率高 = 偏长期）
 - `c_heavy_turnover`：**降序**排名（换手率低 = 偏长期）
 - `c_heavy_hold_period`：升序排名（持有期长 = 偏长期）
+
+---
+
+## 调度方式
+
+### 定时任务（DS 日常调度）
+
+每日触发，由 `should_run` 判断当天是否命中报告期截止窗口（截止日 ±2 天内），每个报告期触发**两次**：
+
+| 触发频率 | 时机 | `ReportFreq` | 数据状态 | 效果 |
+|---|---|---|---|---|
+| 第一次 | 季报截止日（报告期末 +15 工作日，约 07-22） | `QUARTERLY` | c_style='05' 到位，'02' 未出 | 季报级字段更新，半年报级字段前向填充 |
+| 第二次 | 中报/年报截止日（+60/90 自然日，约 08-29/04-30） | `SEMI_ANNUAL` | c_style='02'/'04' 到位 | 持股扩新等全持仓字段正式计算，UNIQUE KEY 覆盖写入 |
+
+**调度核心代码（`__main__`）**：
+
+```python
+ok, report_date = should_run(calc_date, ReportFreq.QUARTERLY)
+if ok:
+    run(report_date)
+
+ok, report_date = should_run(calc_date, ReportFreq.SEMI_ANNUAL)
+if ok:
+    run(report_date)
+```
+
+同一 report_date（如 2025-06-30）最终在 DB 只有一行（UNIQUE KEY），第二次覆盖第一次。
+
+### 历史补数（一次性初始化）
+
+不传参数直接运行，逐季度循环跑所有历史期：
+
+```bash
+python insert.py          # 默认跑 generate_report_dates('2025-12-31', 40)，含 2016-03-31 起所有季报期
+```
+
+**注意**：补数只跑一遍，此时半年报数据已全部到位（历史完整），不需要区分"季报先跑/中报再跑"——所有期的全持仓字段都能一次性算出。
+
+### 字段更新频率汇总
+
+| 类型 | 字段 | 季报期行为 |
+|---|---|---|
+| 季报级（每季更新） | `c_top10_ratio`、重仓交易系列（7个） | 每次都重算 |
+| 半年报级（自动前向填充） | 集中度、主动偏离、换手率、抱团度、买卖时机（19个） | 回退到最近半年报期，值不变 |
+| 半年报级（数据驱动填充） | `c_new_stk_ratio`、`c_new_stk_tag` | 中报/年报未出时回退上一期，出后覆盖 |
 
 ---
 

@@ -214,78 +214,81 @@ def _calc_top10_ratio(heavy_df: pd.DataFrame, equity_df: pd.DataFrame) -> pd.Dat
 
 # ==================== 主动管理 ====================
 
+def _active_sector_dev(fund_sec_w: pd.DataFrame, bm_sec_raw: pd.DataFrame) -> pd.DataFrame:
+    """板块偏离：fund×date 与 bm 所有板块的全量网格（6个板块），缺失填0，绝对差均值"""
+    fund_dates = fund_sec_w[['c_fd_code', 'c_report_date']].drop_duplicates()
+    bm_sectors = bm_sec_raw[['c_report_date', 'sector']].drop_duplicates()
+    grid = fund_dates.merge(bm_sectors, on='c_report_date')
+    grid = (grid.merge(fund_sec_w, on=['c_fd_code', 'c_report_date', 'sector'], how='left')
+                .merge(bm_sec_raw, on=['c_report_date', 'sector'], how='left')
+                .fillna({'fund_sec_w': 0, 'bm_sec_w': 0}))
+    grid['abs_diff'] = (grid['fund_sec_w'] - grid['bm_sec_w']).abs()
+    return (grid.groupby(['c_fd_code', 'c_report_date'])['abs_diff']
+                .mean().rename('active_sector').reset_index())
+
+
+def _active_ind_dev(fund: pd.DataFrame, bm: pd.DataFrame,
+                    fund_sec_w: pd.DataFrame) -> pd.DataFrame:
+    """行业偏离（板块内归一化+板块权重加权）
+    利用等式分解：total|diff| = Σ|f_i-b_i|[fund侧] + (100-Σb_i[fund持有])
+    n = n_fund + n_bm - n_common，避免基金×行业全量交叉展开"""
+    fund = fund[['c_fd_code', 'c_report_date', 'sector', 'c_ind_code', 'c_weight']].copy()
+    bm = bm[['c_report_date', 'sector', 'c_ind_code', 'bm_ind_w']].copy()
+    fund['ind_norm'] = (fund['c_weight'] /
+                        fund.groupby(['c_fd_code', 'c_report_date', 'sector'])['c_weight'].transform('sum') * 100)
+    bm['bm_ind_norm'] = (bm['bm_ind_w'] /
+                         bm.groupby(['c_report_date', 'sector'])['bm_ind_w'].transform('sum') * 100)
+
+    fb = fund[['c_fd_code', 'c_report_date', 'sector', 'c_ind_code', 'ind_norm']].merge(
+        bm[['c_report_date', 'sector', 'c_ind_code', 'bm_ind_norm']],
+        on=['c_report_date', 'sector', 'c_ind_code'], how='left'
+    ).fillna({'bm_ind_norm': 0})
+    fb['abs_diff'] = (fb['ind_norm'] - fb['bm_ind_norm']).abs()
+
+    g = fb.groupby(['c_fd_code', 'c_report_date', 'sector'])
+    stats = g.agg(sum_abs=('abs_diff', 'sum'), sum_bm=('bm_ind_norm', 'sum'),
+                  n_fund=('c_ind_code', 'count')).reset_index()
+    n_bm = bm.groupby(['c_report_date', 'sector'])['c_ind_code'].count().rename('n_bm').reset_index()
+    n_com = (fb[fb['bm_ind_norm'] > 0].groupby(['c_fd_code', 'c_report_date', 'sector'])
+               ['c_ind_code'].count().rename('n_com').reset_index())
+    stats = (stats.merge(n_bm, on=['c_report_date', 'sector'])
+                  .merge(n_com, on=['c_fd_code', 'c_report_date', 'sector'], how='left')
+                  .fillna({'n_com': 0}))
+    stats['ind_dev'] = ((stats['sum_abs'] + 100 - stats['sum_bm']) /
+                        (stats['n_fund'] + stats['n_bm'] - stats['n_com']))
+    stats = stats.merge(fund_sec_w, on=['c_fd_code', 'c_report_date', 'sector'], how='left').fillna({'fund_sec_w': 0})
+    stats['wt'] = stats['ind_dev'] * stats['fund_sec_w']
+    g2 = stats.groupby(['c_fd_code', 'c_report_date'])
+    return (g2['wt'].sum() / g2['fund_sec_w'].sum()).rename('active_ind').reset_index()
+
+
 def _calc_active_deviation(ind_df: pd.DataFrame,
                            benchmark: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """计算主动板块偏离和主动行业偏离（板块内行业加权）"""
-    records = []
-    for rd, bm in benchmark.items():
-        rd_ts = pd.Timestamp(rd)
-        period_ind = ind_df[ind_df['c_report_date'] == rd_ts]
-        if period_ind.empty:
-            continue
+    """主动板块偏离和主动行业偏离，向量化实现，近4期半年报均值"""
+    bm = pd.concat(
+        [df.assign(c_report_date=pd.Timestamp(rd)) for rd, df in benchmark.items()],
+        ignore_index=True
+    )
+    fund = ind_df.copy()
+    fund['sector'] = fund['c_ind_code'].map(SECTOR_MAP)
+    fund = fund.dropna(subset=['sector'])
 
-        bm_sector = bm.groupby('sector')['bm_ind_w'].sum()
-        bm_sector = bm_sector / bm_sector.sum() * 100
+    # 基金板块权重（归一化到100%）
+    sec_sum = fund.groupby(['c_fd_code', 'c_report_date', 'sector'])['c_weight'].sum().reset_index(name='sw')
+    tot = fund.groupby(['c_fd_code', 'c_report_date'])['c_weight'].sum().rename('tot').reset_index()
+    fund_sec_w = sec_sum.merge(tot, on=['c_fd_code', 'c_report_date'])
+    fund_sec_w['fund_sec_w'] = fund_sec_w['sw'] / fund_sec_w['tot'] * 100
+    fund_sec_w = fund_sec_w[['c_fd_code', 'c_report_date', 'sector', 'fund_sec_w']]
 
-        # 预计算 bm 各板块内行业归一化权重（期内固定，不随基金变化）
-        bm_inds_by_sector: dict[str, pd.Series] = {}
-        for s, grp in bm.groupby('sector'):
-            s_inds = grp.set_index('c_ind_code')['bm_ind_w']
-            bm_inds_by_sector[s] = s_inds / s_inds.sum() * 100 if s_inds.sum() > 0 else s_inds
+    # 基准板块权重（归一化到100%）
+    bm_sec_raw = bm.groupby(['c_report_date', 'sector'])['bm_ind_w'].sum().reset_index(name='bm_sec_w')
+    bm_sec_raw['bm_sec_w'] /= bm_sec_raw.groupby('c_report_date')['bm_sec_w'].transform('sum') / 100
 
-        for fd, fdf in period_ind.groupby('c_fd_code'):
-            fund_total = fdf['c_weight'].sum()
-            if fund_total <= 0:
-                continue
+    sector_dev = _active_sector_dev(fund_sec_w, bm_sec_raw)
+    active_ind = _active_ind_dev(fund, bm, fund_sec_w)
 
-            # 基金板块权重（归一化到100%）
-            fdf = fdf.copy()
-            fdf['sector'] = fdf['c_ind_code'].map(SECTOR_MAP)
-            fdf = fdf.dropna(subset=['sector'])
-            fund_sector = fdf.groupby('sector')['c_weight'].sum() / fund_total * 100
-
-            # 板块偏离
-            all_sectors = set(fund_sector.index) | set(bm_sector.index)
-            sector_dev = np.mean([abs(fund_sector.get(s, 0) - bm_sector.get(s, 0))
-                                  for s in all_sectors])
-
-            # 预计算该基金各板块内行业归一化权重
-            fund_inds_by_sector: dict[str, pd.Series] = {}
-            for s, grp in fdf.groupby('sector'):
-                s_inds = grp.set_index('c_ind_code')['c_weight']
-                fund_inds_by_sector[s] = s_inds / s_inds.sum() * 100 if s_inds.sum() > 0 else s_inds
-
-            # 行业偏离（板块内部）
-            weighted_ind_dev = 0.0
-            sector_weight_sum = 0.0
-            for s in all_sectors:
-                fund_s_w = fund_sector.get(s, 0)
-                bm_s_w = bm_sector.get(s, 0)
-                if fund_s_w <= 0 and bm_s_w <= 0:
-                    continue
-
-                fund_inds_norm = fund_inds_by_sector.get(s, pd.Series(dtype=float))
-                bm_inds_norm = bm_inds_by_sector.get(s, pd.Series(dtype=float))
-
-                all_inds = set(fund_inds_norm.index) | set(bm_inds_norm.index)
-                ind_dev = np.mean([abs(fund_inds_norm.get(i, 0) - bm_inds_norm.get(i, 0))
-                                   for i in all_inds])
-                weighted_ind_dev += fund_s_w * ind_dev
-                sector_weight_sum += fund_s_w
-
-            active_ind = weighted_ind_dev / sector_weight_sum if sector_weight_sum > 0 else 0.0
-            records.append({
-                'c_fd_code': fd,
-                'c_report_date': rd_ts,
-                'active_sector': sector_dev,
-                'active_ind': active_ind,
-            })
-
-    if not records:
-        return pd.DataFrame(columns=['c_fd_code', 'c_active_sector', 'c_active_ind'])
-
-    df = pd.DataFrame(records)
-    avg = df.groupby('c_fd_code')[['active_sector', 'active_ind']].mean().round(4).reset_index()
+    result = sector_dev.merge(active_ind, on=['c_fd_code', 'c_report_date'], how='outer')
+    avg = result.groupby('c_fd_code')[['active_sector', 'active_ind']].mean().round(4).reset_index()
     return avg.rename(columns={'active_sector': 'c_active_sector', 'active_ind': 'c_active_ind'})
 
 
