@@ -134,7 +134,8 @@ UNIQUE KEY (c_fd_code, c_trade_date)
 
 ```sql
 -- ✅ 正确
-DISTRIBUTED BY HASH(c_fd_code) BUCKETS 3
+DISTRIBUTED
+BY HASH(c_fd_code) BUCKETS 3
 
 -- ❌ 错误：多列 HASH 无必要且增加复杂度
 DISTRIBUTED BY HASH(c_fd_code, c_report_date) BUCKETS 3
@@ -164,7 +165,8 @@ DISTRIBUTED BY HASH(c_fd_code, c_report_date) BUCKETS 3
 **分区参数统一**（用于需要分区的表）：
 
 ```sql
-PARTITION BY RANGE(c_trade_date) ()
+PARTITION
+BY RANGE(c_trade_date) ()
 -- 动态分区参数
 "dynamic_partition.enable" = "true",
 "dynamic_partition.time_unit" = "MONTH",
@@ -294,45 +296,18 @@ PROPERTIES (...);
 
 ### TYTFUND 通用字段
 
-| 字段      | 含义                        |
-|---------|-----------------------------|
-| EISDEL  | 删除标记，**查询必须加** `EISDEL = '0'` |
-| STYLE   | 报告期类型，见下表              |
+| 字段     | 含义                                                                             |
+|--------|--------------------------------------------------------------------------------|
+| EISDEL | 删除标记，**查询必须加** `EISDEL = '0'`                                                  |
+| STYLE  | 报告期类型，含义见 [business_rules_fund_data.md](../memory/business_rules_fund_data.md) |
 
-### c_style 枚举（报告期类型）
+### 多段记录问题
 
-| 值  | 含义    | 对应季末    | 披露截止       |
-|----|-------|---------|------------|
-| 01 | 一季报   | 03-31   | ~04-22（15工作日） |
-| 02 | 中报    | 06-30   | ~08-29（60日）  |
-| 03 | 三季报   | 09-30   | ~10-22（15工作日） |
-| 04 | 年报    | 12-31   | ~次年03-31（90日）|
-| 05 | **中报副本**  | 06-30   | 同 02，数据完全一致 |
-| 06 | **四季报副本** | 12-31   | ~次年01-22（15工作日），比年报早 |
-
-> **关键规则**：`05` 是 `02` 的重复，`06` 是 `04` 的重复（数据完全一样）。
-> 查询去重时用 `c_style IN ('01','02','03','04')`，不要用 `05`/`06`。
-> 四季报（06）比年报（04）早约 2 个月，但内容有差异（四季报只有持仓，年报有完整财报）。
-
-### c_is_stat（tb_fd_asset_allocation）
-
-| 值  | 含义                  |
-|----|-----------------------|
-| -1 | 某类份额口径（分级基金的合并份额等）  |
-|  0 | 普通基金口径              |
-
-> **关键规则**：同一基金同期只会出现 `-1` 或 `0` 之一，不会同时存在。
-> 两类口径的 `c_stk_total_mv` 值相同（数据来源一致），无需按 c_is_stat 过滤，
-> 用 `c_style IN ('01','02','03','04')` 去重后 `MAX()` 即可。
-
-### FUND_IV_STOCKTRADESUM 多段记录
-
-基金发生合并/分立/更名等变动时，同一 `FUNDCODE` 在同一年可能有多条 `STYLE='04'`（不同 `STARTDATE`-`ENDDATE` 段）。
-
-**处理规则**：按 FUNDCODE 先 `GROUP BY + SUM` 聚合，再做 H2 差分，不能直接 merge。
+基金发生合并/分立/更名等变动时，同一基金代码在同一统计区间内可能存在多条记录（不同 `STARTDATE`-`ENDDATE` 段）。**查询 Oracle
+源表前应先确认是否存在多段**，以 FUND_IV_STOCKTRADESUM 为例：
 
 ```python
-# ✅ 正确：先聚合
+# ✅ 正确：先聚合再计算
 full = (df[df['STYLE'] == '04']
         .groupby('FUNDCODE')[['SHARECOST', 'SELLSUM']].sum()
         .reset_index())
@@ -343,7 +318,9 @@ full = df[df['STYLE'] == '04'][['FUNDCODE', 'SHARECOST', 'SELLSUM']]
 
 ### 历史数据起始基准
 
-项目数据覆盖起点：**2015-12-31**（各主要 Oracle 源表均已有数据）。
-
-计算型标签表（tb_fd_tag_* 系列）历史补数统一从 **2016-03-31** 或 **2016-06-30** 开始，
-视该表依赖的数据窗口长度决定（如换手率从 2015-12-31 开始，以支持 2016 年的 portfolio 标签）。
+| 层级                    | 起点                       |
+|-----------------------|--------------------------|
+| 日频计算层                 | 2015-01-01               |
+| 季度中间层（tb_fd_category） | 2015-03-31               |
+| 半年度中间层                | 2015-06-30               |
+| 标签层（tb_fd_tag_* 系列）   | 2016-12-31（需上游约 2 年历史数据） |

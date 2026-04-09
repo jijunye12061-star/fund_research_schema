@@ -6,19 +6,19 @@
 
 这是**研究环境**，不是生产系统。优先代码简洁可读，避免过度设计。
 
+---
+
 ## 代码风格
 
-### 极致简洁
+### 简洁
 
 - 单函数 ≤ 30 行，超过则拆分为私有函数（`_function_name`）
-- 不添加冗余参数/选项，功能明确单一
-- 不写防御性代码（try-except / 输入校验），研究环境可直接报错
+- 不写防御性代码（try-except / 输入校验），研究环境直接报错即可
 - 避免嵌套 > 3 层，用 early return
-- 用 `assert` 做必要的输入校验，不用 verbose 错误处理
 
 ### 类型提示
 
-类型提示必须有，但不写冗长说明：
+必须有，docstring 一行说明用途即可，不写 Args/Returns/Raises 块。
 
 ```python
 def get_trade_calendar(start_date: str, end_date: str) -> pd.DatetimeIndex:
@@ -26,46 +26,17 @@ def get_trade_calendar(start_date: str, end_date: str) -> pd.DatetimeIndex:
     ...
 ```
 
-### 注释规范
-
-- 1 行 docstring 为主，说明函数用途即可
-- 中文注释可接受，项目中广泛使用
-- 不写冗长的 Args/Returns 说明（类型提示已经够了）
-
-```python
-# ✅ 好的
-def calc_annualized_return(nav_series: pd.Series, days: int) -> float:
-    """计算年化收益率（基于自然日365天）"""
-    ...
-
-# ❌ 过度注释
-def calc_annualized_return(nav_series: pd.Series, days: int) -> float:
-    """
-    计算年化收益率
-    
-    Args:
-        nav_series: 净值序列
-        days: 天数
-    Returns:
-        float: 年化收益率
-    Raises:
-        ValueError: 如果天数为0
-    """
-    ...
-```
-
-### 命名规范
+### 命名
 
 - 变量自解释：`fund_nav_df` 而非 `df1`
 - 函数名动词开头：`get_`、`calc_`、`process_`、`_private_helper`
 - 常量大写：`BATCH_SIZE = 100`、`ENV = 'dev'`
-- 返回类型固定，不用 Optional 除非确实需要
+- 中文注释可接受，项目中广泛使用
 
 ### 数据处理
 
 - 优先 pandas 向量化操作，避免 for 循环
-- `pd.Timestamp` 作为标准 datetime 类型（桥接 `datetime.datetime` 和 `np.datetime64`）
-- SQL 必须使用绑定变量（`:param`），**禁止 f-string 拼接**防止注入
+- SQL 必须使用绑定变量（`:param`），**禁止 f-string 拼接**
 
 ```python
 # ✅ 绑定变量
@@ -76,25 +47,29 @@ df = oracle.query(sql, code='000001')
 sql = f"SELECT * FROM tb WHERE c_fd_code = '{code}'"
 ```
 
+---
+
 ## 入口函数模式
 
-每个 insert.py 统一使用 `run(date)` 作为入口，支持命令行参数：
+每个 insert.py 统一使用 `run(date)` 作为入口，`ENV` 声明在顶部。参数名随表类型而定：
+
+- 日频表：`run(calc_date: str)` — 传交易日
+- 季度/半年度表：`run(report_date: str)` — 传报告期末日期
 
 ```python
 ENV = 'dev'  # 切换环境: 'dev' | 'prod'
 
-def run(calc_date: str) -> None:
-    """主入口，calc_date格式: YYYY-MM-DD"""
-    df = _get_source_data(calc_date)
+
+def run(report_date: str) -> None:
+    """主入口，report_date 格式: YYYY-MM-DD"""
+    df = _get_source_data(report_date)
     with DorisConnector(ENV) as doris:
         doris.insert('tb_xxx', df)
-
-if __name__ == '__main__':
-    import sys
-    biz_date = sys.argv[1] if len(sys.argv) > 1 else '20260106'
-    biz_date = parse_biz_date(biz_date)  # DS传入 %Y%m%d → %Y-%m-%d，见 etl-guide.md "日期参数"
-    run(biz_date)
 ```
+
+`__main__` 的 DS 调度入口与补数循环模板见 [调度指南](scheduling-guide.md)。
+
+---
 
 ## DolphinScheduler 路径适配
 
@@ -103,6 +78,7 @@ if __name__ == '__main__':
 ```python
 import sys
 from pathlib import Path
+
 
 def _setup_path():
     """兼容本地和DS环境的路径适配"""
@@ -116,10 +92,13 @@ def _setup_path():
         return
     raise RuntimeError("找不到 utils 目录，请检查路径配置")
 
+
 _setup_path()
 ```
 
-> 不能提取到 `common.py`——鸡生蛋问题（要先设好路径才能 import common）。每个文件保留这段代码即可。
+> 不能提取到 `common.py`——要先设好路径才能 import common。每个文件保留这段代码。
+
+---
 
 ## 计算指标惯例
 
@@ -127,4 +106,4 @@ _setup_path()
 - **年化波动率**：基于交易日（252 天）
 - **YTD/区间收益基准**：取上一期最后一个交易日（不是当期第一天），使用 `nav_adj_pre` 字段
 - **两级指标体系**：基础指标（收益率、回撤）最低数据要求；风险调整指标（Sharpe、波动率）要求 ≥ 10 个交易日
-- **存储约定**（回撤正值、百分比乘100等）：见 database-conventions.md "研究环境设计原则"
+- **存储约定**（回撤正值、百分比乘 100 等）：见 [database-conventions.md](database-conventions.md)
