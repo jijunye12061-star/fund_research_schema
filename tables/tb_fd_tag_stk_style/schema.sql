@@ -29,6 +29,9 @@ CREATE TABLE tytdata.tb_fd_tag_stk_style
     c_dividend_score   DECIMAL(10,4)  COMMENT '持仓加权DTOP z-score均值（近4期半年报，股息率因子）',
     c_dividend_tag     VARCHAR(10)    COMMENT '红利标签：高股息/中股息/低股息',
 
+    c_stability_score  DECIMAL(10,4)  COMMENT '风格稳定性分位数（0-100，市值与价值成长std各自非港股同类分位均值）',
+    c_stability_tag    VARCHAR(10)    COMMENT '风格稳定性标签：稳定/适中/漂移（港股基金置空）',
+
     c_updatetime       DATETIME(6) DEFAULT CURRENT_TIMESTAMP(6) COMMENT '更新时间'
 ) ENGINE = OLAP
 UNIQUE KEY (c_report_date, c_fd_code)

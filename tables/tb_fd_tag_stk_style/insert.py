@@ -37,6 +37,7 @@ OUTPUT_COLS = [
     'c_profit_score', 'c_profit_tag',
     'c_quality_score', 'c_quality_tag',
     'c_dividend_score', 'c_dividend_tag',
+    'c_stability_score', 'c_stability_tag',
 ]
 
 
@@ -215,6 +216,40 @@ def _assign_relative_tags(result: pd.DataFrame, fund_types: pd.DataFrame,
         result.loc[valid_mask, tag_col] = tags
 
 
+# ==================== 稳定性标签 ====================
+
+def _calc_stability(period_scores: list[pd.DataFrame], hk_funds: set) -> pd.DataFrame:
+    """
+    风格稳定性标签：市值与价值-成长维度 4期std → 非港股同类分位均值 → 稳定/适中/漂移。
+    港股基金及期数不足(<2期)的基金返回 NULL。
+    """
+    all_df = pd.concat(period_scores, ignore_index=True)
+    all_df['vg_spread'] = all_df['value_score'] - all_df['growth_score']
+
+    std_df = all_df.groupby('c_fd_code').agg(
+        size_std=('size_score', 'std'),
+        vg_std=('vg_spread', 'std'),
+        n_periods=('size_score', 'count'),
+    ).reset_index()
+
+    # 非港股 & 至少2期才进入排名（基金池要求满1年，实际会有2期）
+    peer_mask = (std_df['n_periods'] >= 2) & (~std_df['c_fd_code'].isin(hk_funds))
+    peers = std_df.loc[peer_mask].copy()
+    peers['size_pct'] = peers['size_std'].rank(pct=True) * 100
+    peers['vg_pct']   = peers['vg_std'].rank(pct=True) * 100
+    peers['c_stability_score'] = peers[['size_pct', 'vg_pct']].mean(axis=1)
+
+    std_df = std_df.merge(peers[['c_fd_code', 'c_stability_score']], on='c_fd_code', how='left')
+
+    s = std_df['c_stability_score']
+    std_df['c_stability_tag'] = np.select(
+        [s < 30, s <= 70], ['稳定', '适中'], default='漂移'
+    )
+    std_df.loc[std_df['c_stability_score'].isna(), 'c_stability_tag'] = None
+
+    return std_df[['c_fd_code', 'c_stability_score', 'c_stability_tag']]
+
+
 # ==================== 主入口 ====================
 
 def run(calc_date: str) -> None:
@@ -259,6 +294,9 @@ def run(calc_date: str) -> None:
 
         _assign_size_vg_tags(result, avg_50, avg_70, avg_vg1, avg_vg2)
         _assign_relative_tags(result, fund_types, hk_funds)
+
+        stability = _calc_stability(period_scores, hk_funds)
+        result = result.merge(stability, on='c_fd_code', how='left')
 
         result['c_report_date'] = pd.to_datetime(calc_date)
         doris.insert('tb_fd_tag_stk_style', result[OUTPUT_COLS])
