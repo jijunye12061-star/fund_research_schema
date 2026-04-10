@@ -16,7 +16,7 @@ CREATE TABLE tytdata.tb_fd_manager (
     c_birth_date    DATE            COMMENT '出生日期',
     c_education     VARCHAR(40)     COMMENT '学历',
     c_exp_years     FLOAT           COMMENT '从业年限',
-    c_resume        TEXT            COMMENT '简历(截取前4000字符)',
+    c_resume        TEXT            COMMENT '简历(截取前2000字符)',
     c_remark        TEXT            COMMENT '附注',
     c_source        VARCHAR(50)     COMMENT '数据来源'
 ) UNIQUE KEY(c_start_date, c_person_code, c_fd_code, c_post)
