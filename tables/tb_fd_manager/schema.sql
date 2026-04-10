@@ -12,7 +12,7 @@ CREATE TABLE tytdata.tb_fd_manager (
     c_is_current    TINYINT         COMMENT '是否在任(-1在任/0离任)',
     c_notice_date   DATE            COMMENT '公告日期',
     c_leave_reason  VARCHAR(200)    COMMENT '离任原因',
-    c_sex           VARCHAR(2)      COMMENT '性别',
+    c_sex           VARCHAR(6)      COMMENT '性别',
     c_birth_date    DATE            COMMENT '出生日期',
     c_education     VARCHAR(40)     COMMENT '学历',
     c_exp_years     FLOAT           COMMENT '从业年限',
