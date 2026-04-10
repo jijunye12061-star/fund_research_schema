@@ -2,12 +2,12 @@
 -- 数据来源：TYTFUND.FUND_BS_FEXECUTIVE
 -- 更新方式：全量覆盖（sync_fd_manager.py）
 CREATE TABLE tytdata.tb_fd_manager (
-    c_fd_code       VARCHAR(6)      NOT NULL COMMENT '基金代码',
-    c_person_code   VARCHAR(8)      NOT NULL COMMENT '基金经理编码',
-    c_mgr_name      VARCHAR(100)    COMMENT '基金经理姓名',
-    c_post          VARCHAR(20)     COMMENT '职位(基金经理/基金经理助理/代理基金经理)',
-    c_job_title     VARCHAR(60)     COMMENT '职称',
     c_start_date    DATE            COMMENT '任职开始日期',
+    c_person_code   VARCHAR(8)      NOT NULL COMMENT '基金经理编码',
+    c_fd_code       VARCHAR(6)      NOT NULL COMMENT '基金代码',
+    c_post          VARCHAR(20)     COMMENT '职位(基金经理/基金经理助理/代理基金经理)',
+    c_mgr_name      VARCHAR(100)    COMMENT '基金经理姓名',
+    c_job_title     VARCHAR(60)     COMMENT '职称',
     c_end_date      DATE            COMMENT '离任日期(NULL=在任)',
     c_is_current    TINYINT         COMMENT '是否在任(-1在任/0离任)',
     c_notice_date   DATE            COMMENT '公告日期',
