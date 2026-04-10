@@ -2,7 +2,6 @@
 -- 数据来源：TYTFUND.FUND_BS_FEXECUTIVE
 -- 更新方式：全量覆盖（sync_fd_manager.py）
 CREATE TABLE tytdata.tb_fd_manager (
-    c_record_id     BIGINT          NOT NULL COMMENT '记录内码',
     c_fd_code       VARCHAR(6)      NOT NULL COMMENT '基金代码',
     c_person_code   VARCHAR(8)      NOT NULL COMMENT '基金经理编码',
     c_mgr_name      VARCHAR(100)    COMMENT '基金经理姓名',
@@ -20,7 +19,7 @@ CREATE TABLE tytdata.tb_fd_manager (
     c_resume        TEXT            COMMENT '简历(截取前4000字符)',
     c_remark        TEXT            COMMENT '附注',
     c_source        VARCHAR(50)     COMMENT '数据来源'
-) UNIQUE KEY(c_record_id)
+) UNIQUE KEY(c_start_date, c_person_code, c_fd_code, c_post)
 COMMENT '基金经理任职信息[机构研究]'
 DISTRIBUTED BY HASH(c_fd_code) BUCKETS 3
 PROPERTIES (

@@ -7,7 +7,7 @@
 | 表类型 | 视图（Oracle 实时映射） |
 | 数据来源 | `TYTFUND.FUND_BS_FEXECUTIVE` |
 | 过滤条件 | `EISDEL = '0'` |
-| 主键逻辑 | `c_fd_code + c_person_code + c_start_date + c_post` |
+| 主键逻辑 | `c_start_date + c_person_code + c_fd_code + c_post` |
 | 总记录数 | ~83372 条 |
 | 数据时效 | 实时（视图直查 Oracle） |
 
@@ -23,7 +23,6 @@ Oracle 表 `TYTFUND.FUND_BS_FEXECUTIVE` 记录基金经理/助理/代理的历�
 
 | 字段 | 类型 | 注释 | 说明 |
 |------|------|------|------|
-| c_record_id | BIGINT | 记录内码 | Oracle 表主键（FNID），每条记录唯一 |
 | c_fd_code | VARCHAR(6) | 基金代码 | |
 | c_person_code | VARCHAR(8) | 基金经理编码 | 跨基金唯一，对应 c_manager_code |
 | c_mgr_name | VARCHAR(100) | 基金经理姓名 | |

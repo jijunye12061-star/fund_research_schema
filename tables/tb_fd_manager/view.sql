@@ -2,7 +2,6 @@
 -- 数据来源：TYTFUND.FUND_BS_FEXECUTIVE
 -- 表类型：视图（Oracle 实时映射）
 CREATE VIEW tytdata.tb_fd_manager (
-    c_record_id     COMMENT '记录内码',
     c_fd_code       COMMENT '基金代码',
     c_person_code   COMMENT '基金经理编码',
     c_mgr_name      COMMENT '基金经理姓名',
@@ -22,7 +21,6 @@ CREATE VIEW tytdata.tb_fd_manager (
     c_source        COMMENT '数据来源'
 ) COMMENT '基金经理任职信息[机构研究]' AS
 SELECT
-    a.FNID          AS c_record_id,
     a.FUNDCODE      AS c_fd_code,
     a.PERSONCODE    AS c_person_code,
     a.NAME          AS c_mgr_name,
