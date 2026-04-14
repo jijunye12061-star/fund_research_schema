@@ -8,20 +8,7 @@
 - **计算频率**: 季度末，DS 调度
 - **基金范围**: 主动权益（001001）+ 全部混合型（004），仅主代码（去重A/C子份额和联接基金）
 - **阈值机制**: 相对阈值均按基金类型（001/002/003/004）分别排名
-
----
-
-## 数据依赖
-
-| 上游 | 用途 |
-|---|---|
-| `tb_fd_ind_weight` | 行业权重（仅半年报期：06-30/12-31） |
-| `tb_fd_portfolio_stk` | 季报重仓股（c_style: 01/03/05/06）；半年报全持仓（02/04） |
-| `tb_idx_weight` | 中证800成分股日权重（c_idx_code='000906'） |
-| `tb_stk_industry` | 个股→中信一级行业（c_citic_code前6位） |
-| `tb_fd_category` | 基金类型（c_type1_code） |
-| `tb_trade_calendar` | 报告期→最近交易日 |
-| `sector_mapping.yaml` | 中信一级行业→六大板块映射（复用 region_sector 目录） |
+- **依赖表**: `tb_fd_ind_weight` / `tb_fd_portfolio_stk` / `tb_idx_weight` / `tb_stk_industry` / `tb_fd_category` / `tb_trade_calendar`
 
 ---
 
@@ -69,73 +56,14 @@
 
 ---
 
-## 关键计算说明
+## 注意事项
 
-### 行业偏离度（主动行业配置）算法
+每个报告期触发**两次**：季报截止日（约报告期末 +15 工作日）和半年报/年报截止日（约 +60/90 自然日）。两次写同一 `c_report_date`，UNIQUE KEY 覆盖。查数时需注意字段更新频率：
 
-主动行业偏离是**板块内部**衡量，避免简单行业偏离被板块集中度放大：
-
-1. 对每个板块 S，将基金和基准在板块内的行业权重各自归一化（板块内合计=100%）
-2. 计算板块内各行业权重差的绝对值均值 → 该板块的行业偏离
-3. 以基金的板块权重为权重，加权汇总所有板块的行业偏离
-
-### 重仓交易复合排名方向
-
-三个指标方向一致（值越大代表越偏长期持有）：
-- `c_heavy_retain_rate`：升序排名（留存率高 = 偏长期）
-- `c_heavy_turnover`：**降序**排名（换手率低 = 偏长期）
-- `c_heavy_hold_period`：升序排名（持有期长 = 偏长期）
-
----
-
-## 调度方式
-
-### 定时任务（DS 日常调度）
-
-每日触发，由 `should_run` 判断当天是否命中报告期截止窗口（截止日 ±2 天内），每个报告期触发**两次**：
-
-| 触发频率 | 时机 | `ReportFreq` | 数据状态 | 效果 |
-|---|---|---|---|---|
-| 第一次 | 季报截止日（报告期末 +15 工作日，约 07-22） | `QUARTERLY` | c_style='05' 到位，'02' 未出 | 季报级字段更新，半年报级字段前向填充 |
-| 第二次 | 中报/年报截止日（+60/90 自然日，约 08-29/04-30） | `SEMI_ANNUAL` | c_style='02'/'04' 到位 | 持股扩新等全持仓字段正式计算，UNIQUE KEY 覆盖写入 |
-
-**调度核心代码（`__main__`）**：
-
-```python
-ok, report_date = should_run(calc_date, ReportFreq.QUARTERLY)
-if ok:
-    run(report_date)
-
-ok, report_date = should_run(calc_date, ReportFreq.SEMI_ANNUAL)
-if ok:
-    run(report_date)
-```
-
-同一 report_date（如 2025-06-30）最终在 DB 只有一行（UNIQUE KEY），第二次覆盖第一次。
-
-### 历史补数（一次性初始化）
-
-不传参数直接运行，逐季度循环跑所有历史期：
-
-```bash
-python insert.py          # 默认跑 generate_report_dates('2025-12-31', 40)，含 2016-03-31 起所有季报期
-```
-
-**注意**：补数只跑一遍，此时半年报数据已全部到位（历史完整），不需要区分"季报先跑/中报再跑"——所有期的全持仓字段都能一次性算出。
-
-### 字段更新频率汇总
+### 字段更新频率
 
 | 类型 | 字段 | 季报期行为 |
 |---|---|---|
 | 季报级（每季更新） | `c_top10_ratio`、重仓交易系列（7个） | 每次都重算 |
 | 半年报级（自动前向填充） | 集中度、主动偏离、换手率、抱团度、买卖时机（19个） | 回退到最近半年报期，值不变 |
 | 半年报级（数据驱动填充） | `c_new_stk_ratio`、`c_new_stk_tag` | 中报/年报未出时回退上一期，出后覆盖 |
-
----
-
-## 延后实现事项
-
-- [x] `c_turnover_avg` / `c_turnover_tag`：已建 `tb_fd_turnover` 表（Oracle FUND_IV_STOCKTRADESUM → Doris）
-- [x] `c_crowd_score` / `c_crowd_internal_score` / `c_crowd_tag`：已建 `tb_stk_crowding_score` 个股抱团度中间表
-- [ ] 买入/卖出时点标签（左侧/右侧）：需要个股区间收益数据
-- [x] 回溯修改 `tb_fd_tag_stk_style`：相对标签改为按基金类型分别排名（已修复）

@@ -28,10 +28,15 @@ fund_research_schema/
 │   ├── db_connector.py         # OracleConnector / DorisConnector
 │   └── common.py               # get_trade_calendar, get_active_funds 等
 │
-├── docs/                       # 项目级文档
-│   ├── coding-standards.md
-│   ├── database-conventions.md
-│   └── ...
+├── docs/
+│   ├── infra/                  # 基建规范（建表/ETL/调度/命名）
+│   │   ├── coding-standards.md
+│   │   ├── database-conventions.md
+│   │   └── ...
+│   ├── query/                  # 取数规范
+│   │   └── query-guide.md
+│   └── shared/                 # 共享领域知识
+│       └── equity-fund-labels.md
 │
 ├── .gitignore
 └── README.md
@@ -67,40 +72,25 @@ tables/tb_fd_basic_info/
 ```
 tables/tb_fd_perform_abs/
 ├── schema.sql        # CREATE TABLE 语句
-├── insert.py         # 计算脚本
-└── SPEC.md           # 需详细说明计算逻辑
+├── insert.py         # 计算脚本（计算逻辑注释在此）
+└── SPEC.md
 ```
 
-## SPEC.md 模板
+## SPEC.md 内容规范
 
-```markdown
-# tb_xxx - 表中文名
+SPEC 以**取数为主定位**，服务于 query skill 生成 SQL / 分析代码。
 
-## 基本信息
-- **主键**: (c_trade_date, c_fd_code)
-- **表类型**: 物化型 / 视图型 / 计算型
-- **更新频率**: 日度 / 季度 / 全量
+**必须包含：**
+- 基本信息（主键 / 更新频率 / 适用范围）
+- 字段清单（名 / 类型 / 注释 / 单位）
+- 枚举值（如有）
+- **注意事项**（取数易踩的坑：去重条件、必须逐期查、NULL 场景等）
+- 使用示例（1–2 个典型 SQL）
 
-## 数据来源
-- **Oracle表**: TYTFUND.XXX（主表）
-- **更新逻辑**: 全量替换 / 增量更新
-- **过滤条件**: WHERE EISDEL = '0'（如有）
+**不写在 SPEC 里：**
+- Oracle 源表 JOIN 条件 / 计算步骤细节 → 放 insert.py 注释
+- 下游依赖（谁消费了这张表）
+- 历史补数命令 / DS 调度代码
 
-## 数据质量
-- 特殊处理说明
-- 默认值规则
-
-## 字段清单
-| 字段名 | 类型 | 注释 | 说明 |
-|--------|------|------|------|
-| c_fd_code | VARCHAR(20) | 基金代码 | 六位代码 |
-
-## 枚举值（如有）
-| 代码 | 名称 |
-|------|------|
-| 01   | 一季报 |
-
-## 使用示例
-（SQL查询示例）
-```
+计算型表可在"基本信息"末尾加一行 `**依赖表**：xxx / xxx`，供追溯上游时用。
 

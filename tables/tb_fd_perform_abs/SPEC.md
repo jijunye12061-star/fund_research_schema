@@ -6,6 +6,7 @@
 - **主键**: (c_fd_code, c_trade_date, c_period_code)
 - **更新频率**: 每日
 - **说明**: 存储基金在不同时间区间的绝对收益表现指标,包括收益、风险和风险调整后收益等核心指标
+- **依赖表**: `tb_fd_nav_daily` / `tb_trade_calendar`
 
 ## 字段清单
 

@@ -4,7 +4,7 @@
 
 - **主键**: (c_report_date, c_fd_code)
 - **更新频率**: 半年度
-- **数据来源**: FUND_IV_HOLDCREDITRISKO + FUND_IV_RISKSENSITIVE → 聚合计算
+- **依赖表**: Oracle `FUND_IV_HOLDCREDITRISKO` / `FUND_IV_RISKSENSITIVE` / `FUND_IV_ASSETALLOCT`
 
 ## 字段清单
 

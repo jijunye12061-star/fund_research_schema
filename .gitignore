@@ -25,7 +25,6 @@ env/
 # === Config & Secrets ===
 .env
 config/database.yaml
-CLAUDE.md
 
 # === Logs ===
 *.log
@@ -47,3 +46,6 @@ desktop.ini
 *.png
 *.jpg
 *.jpeg
+
+# === 应用侧输出（不入库）===
+data/

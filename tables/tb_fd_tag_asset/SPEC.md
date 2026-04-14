@@ -4,6 +4,8 @@
 
 - **主键**: (c_fd_code, c_report_date)
 - **更新频率**: 季度
+- **适用范围**: `tb_fd_category.c_type1_code IN ('001')` 主动权益/指数增强/被动指数基金
+- **依赖表**: `tb_fd_asset_allocation` / `tb_fd_category`
 
 ## 字段清单
 
@@ -51,6 +53,8 @@ WHERE c_report_date = '2024-09-30'
 
 - **主键**: (c_fd_code, c_report_date)
 - **更新频率**: 季度
+- **适用范围**: `tb_fd_category.c_type1_code IN ('002')` 固收+基金（可转债/混合债/偏债混合/灵活配置）
+- **依赖表**: `tb_fd_asset_allocation` / `tb_fd_category`
 
 ## 字段清单
 
@@ -113,6 +117,8 @@ WHERE c_report_date = '2024-09-30'
 
 - **主键**: (c_fd_code, c_report_date)
 - **更新频率**: 季度
+- **适用范围**: `tb_fd_category.c_type1_code IN ('004')` 混合型基金（偏股/平衡/偏债/灵活配置）
+- **依赖表**: `tb_fd_asset_allocation` / `tb_fd_category`
 
 ## 字段清单
 

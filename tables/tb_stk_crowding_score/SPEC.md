@@ -7,16 +7,7 @@
 - **KEY**: `(c_report_date, c_company_code, c_stk_code)`
 - **计算频率**: 半年报期（06-30 / 12-31），DS 调度
 - **股票范围**: A股（6位代码）
-
----
-
-## 数据依赖
-
-| 上游 | 用途 |
-|---|---|
-| `tytdata.tb_fd_portfolio_stk` | 广义权益基金全持仓（c_style IN '02','04'） |
-| `tytdata.tb_fd_category` | 基金分类（筛选广义权益基金） |
-| `tytdata.tb_fd_basic_info` | 基金→公司代码映射（c_company_code） |
+- **依赖表**: `tb_fd_portfolio_stk` / `tb_fd_category` / `tb_fd_basic_info`
 
 ---
 
@@ -32,37 +23,9 @@
 
 ---
 
-## 计算说明
+## 注意事项
 
-### 广义权益基金范围
-
-`c_type2_code = '001001'`（主动权益型）+ `c_type1_code = '004'`（全部混合型，含偏股/平衡/偏债/灵活配置）。
-
-排除：001002 指数增强、001003 被动指数（ETF）、002 固收加、003 债券型。
-
-**主代码去重**：JOIN `tb_fd_basic_info`，过滤 `b.c_init_code = b.c_fd_code OR b.c_init_code IS NULL`，排除A/C子份额和ETF联接基金。
-
-### 每期计算流程
-
-1. 筛选广义权益基金的半年报全持仓（c_style IN ('02','04')，同一(fd, stk)取最大市值去重，仅保留A股 LENGTH=6）
-2. **全市场口径**（c_company_code = 'MKT'）：汇总全部持仓市值，按 c_total_hold_mv 做全市场百分位排名
-3. **公司口径**（c_company_code = 公司代码）：按公司分组，各公司内部独立排名
-
-### 得分含义
-
-- 得分越接近 1：该股票在该口径下越受基金青睐（持仓市值越大）
-- 全市场口径与公司口径的排名相互独立，不可直接比较
-
-### 下游聚合（在 tb_fd_tag_stk_portfolio 中执行）
-
-**全市场抱团度 `c_crowd_score`**:
-```
-WHERE c_company_code = 'MKT'
-c_crowd_score_fund = SUM(c_crowd_score × c_hold_value) / SUM(c_hold_value)
-```
-
-**同公司抱团度 `c_crowd_internal_score`**:
-```
-WHERE c_company_code = 该基金所属公司
-c_crowd_internal_score_fund = SUM(c_crowd_score × c_hold_value) / SUM(c_hold_value)
-```
+- **广义权益基金范围**：主动权益（c_type2_code='001001'）+ 全部混合型（c_type1_code='004'）；已做主代码去重
+- `c_company_code = 'MKT'` 为全市场口径，其余为基金公司内部口径
+- 得分为**口径内**百分位排名（0~1），全市场与公司口径不可直接比较
+- 仅半年报期（06-30 / 12-31）有数据；查询时按 `c_report_date = :date` 精确查

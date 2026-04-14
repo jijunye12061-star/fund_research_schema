@@ -12,21 +12,7 @@
 | 基金范围 | tb_fd_category 前四类（001/002/003/004） |
 | 历史起点 | 2016-12-31（风险模型因子数据从该期开始） |
 
-## 数据来源
-
-| 数据 | 来源表 | 说明 |
-|------|--------|------|
-| 基金持仓 | tb_fd_portfolio_stk | c_style IN ('02','04')，近4期半年报，仅A股（6位代码） |
-| 因子值 | tb_stk_risk_factor | VALUE/GROWTH/MOMENTUM/PROF/QUALITY，报告期最近交易日 |
-| 流通市值 | tb_stk_barra_status | c_float_mv（元），同时用于A股标的过滤 |
-| 港股过滤 | tb_fd_tag_stk_region_sector | 动量/盈利/质量跨基金分位时排除 c_region_tag='港股' 的基金 |
-| 基金分类 | tb_fd_category | 确定基金范围 |
-
-**半年报期定义：** `generate_report_dates(calc_date, 8)` 中 06-30 或 12-31 的4个日期。
-
-**因子日期对齐：** 使用 `tb_trade_calendar.c_max_trade_date`，取 `<= report_date` 的最近交易日（处理06-30等非交易日情形）。
-
-**持仓去重：** 同一 (c_fd_code, c_stk_code) 多 c_style 时，取 MIN(c_style) 对应的记录。
+**依赖表**: `tb_fd_portfolio_stk` / `tb_stk_risk_factor` / `tb_stk_barra_status` / `tb_fd_tag_stk_region_sector` / `tb_fd_category` / `tb_trade_calendar`
 
 ## 字段清单
 

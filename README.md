@@ -35,7 +35,7 @@ fund_research_schema/
 
 ## 三、核心模块说明
 
-> 详细用法见 [`docs/etl-guide.md`](docs/etl-guide.md)
+> 详细用法见 [`docs/infra/etl-guide.md`](docs/infra/etl-guide.md)
 
 | 模块 | 说明 |
 |------|------|
@@ -57,9 +57,9 @@ fund_research_schema/
 | 物化型 | `schema.sql` + `insert.py` + `SPEC.md` | 定期同步，含数据清洗 |
 | 计算型 | `schema.sql` + `insert.py` + `SPEC.md` | 基于 Doris 已有数据计算衍生指标 |
 
-> 命名规范和建表规范见 [`docs/database-conventions.md`](docs/database-conventions.md)
+> 命名规范和建表规范见 [`docs/infra/database-conventions.md`](docs/infra/database-conventions.md)
 
-> 代码规范见 [`docs/coding-standards.md`](docs/coding-standards.md)
+> 代码规范见 [`docs/infra/coding-standards.md`](docs/infra/coding-standards.md)
 
 ---
 
