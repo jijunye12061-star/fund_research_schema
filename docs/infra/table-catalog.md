@@ -26,6 +26,9 @@
 | tb_idx_quote_daily | 指数日行情，含开高低收/PE/PB | 视图，实时 |
 | tb_trade_calendar | 交易日历，`c_max_trade_date` 是报告期转最近交易日的关键字段 | 按需全量 |
 | tb_dict_params | 11 套行业/概念分类代码映射 | 按需全量 |
+| tb_bd_basic_info | 债券基础信息，含正股代码 `c_stk_code`、债券类型、发行/上市/退市日 | 视图，实时 |
+| tb_cb_analysis | 转债日频估值：转股溢价率、纯债溢价率、平底溢价率、Delta、YTM | 视图，实时 |
+| tb_bd_quote_daily | 债券日行情：全价/净价 OHLC、VWAP、成交量/额/笔数、YTM（银行间）| 视图，实时 |
 
 ---
 
