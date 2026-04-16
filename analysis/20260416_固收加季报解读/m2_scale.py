@@ -105,13 +105,13 @@ def _build_fund_list(universe: pd.DataFrame,
     )
 
     return df[[
-        'c_fd_code', 'c_short_name', 'c_type2_name', 'c_company_name', 'c_mgr_name',
+        'c_fd_code', 'c_short_name', 'c_type2_name', 'c_company_name', 'c_manager_name',
         'c_estabdate', '本期规模(亿)', '上期规模(亿)', '规模变化(亿)', '规模变化%',
         'c_eq_risk_level', 'c_stk_cb_strategy', '是否新成立',
     ]].rename(columns={
         'c_fd_code': '基金代码', 'c_short_name': '基金简称',
         'c_type2_name': '二级类型', 'c_company_name': '基金公司',
-        'c_mgr_name': '基金经理', 'c_estabdate': '成立日期',
+        'c_manager_name': '基金经理', 'c_estabdate': '成立日期',
         'c_eq_risk_level': '风险特征', 'c_stk_cb_strategy': '股债策略',
     })
 

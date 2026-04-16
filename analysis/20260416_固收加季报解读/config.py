@@ -72,7 +72,7 @@ def fetch_fi_universe(doris: DorisConnector, report_date: str) -> pd.DataFrame:
         cat.c_type2_code,
         cat.c_type2_name,
         b.c_company_name,
-        b.c_mgr_name,
+        b.c_manager_name,
         b.c_estabdate
     FROM tb_fd_category cat
     JOIN tb_fd_basic_info b ON b.c_fd_code = cat.c_fd_code
