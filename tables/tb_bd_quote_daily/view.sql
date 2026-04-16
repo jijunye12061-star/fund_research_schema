@@ -1,6 +1,6 @@
 CREATE VIEW tytdata.tb_bd_quote_daily (
     c_trade_date      COMMENT '交易日期',
-    c_bd_code         COMMENT '债券代码(6位)',
+    c_bd_code         COMMENT '债券代码',
     c_bd_inner_code   COMMENT '债券内码',
     c_bd_name         COMMENT '债券简称',
     c_net_open        COMMENT '开盘净价(元)',
@@ -15,7 +15,7 @@ CREATE VIEW tytdata.tb_bd_quote_daily (
     c_full_low        COMMENT '最低全价(元)',
     c_full_avg        COMMENT '全价加权均价(元)',
     c_full_pre_close  COMMENT '前收盘全价(元)',
-    c_volume          COMMENT '成交量(沪深单位:手;银行间单位:元)',
+    c_volume          COMMENT '成交量',
     c_amount          COMMENT '成交金额(元)',
     c_trade_num       COMMENT '成交笔数',
     c_ytm_close       COMMENT '收盘到期收益率(%)',

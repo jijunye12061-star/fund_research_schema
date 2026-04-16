@@ -100,6 +100,7 @@ tb_fd_perform_abs
 | DROP TABLE    | **不加**             | 建表语句不含 DROP，DBA 单独处理                                                 |
 | TABLE COMMENT | **必须加** `[机构研究]`   | `COMMENT '表中文名[机构研究]'`                                               |
 | 关键字大写         | **统一大写**           | `DATE`、`DATETIME(6)`、`DECIMAL`、`VARCHAR`                             |
+| 字段 COMMENT    | **只写字段中文名+单位**     | 保留 `(元)` `(%)` `(BP)` 等简短单位；删除括号内的枚举值、计算公式、条件说明（详见 SPEC.md）          |
 | 头部注释          | **统一分隔线格式**        | 见下方模板                                                                |
 
 ### DECIMAL 精度统一
