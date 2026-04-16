@@ -3,6 +3,7 @@
 
 Sheet 1: 基金经理变动明细（基金维度）— 代码 / 名称 / 开始时间 / 结束时间 / 基金经理
 Sheet 2: 基金经理汇总（经理维度）— 经理代码 / 名称 / 公司 / 各类管理数量 / 最长任期 / 最长独立任期
+Sheet 3: 经理变动分类（基金维度）— 完全未变 / 仅新增 / 部分更替 / 完全更换 / 期间新成立
 """
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from utils.log import setup_logger
 
 logger = setup_logger(__name__)
 ENV = 'dev'
+CUT_DATE = '2024-12-31'  # 经理变动统计起点
 
 
 # ── 查询 ─────────────────────────────────────────────────────────
@@ -21,7 +23,8 @@ ENV = 'dev'
 def _fetch_manager_history(doris: DorisConnector) -> pd.DataFrame:
     """股票型/混合型/债券型、未清盘、主代码的全部正式基金经理任职记录"""
     sql = """
-    SELECT m.c_fd_code, b.c_short_name, m.c_person_code, m.c_mgr_name,
+    SELECT m.c_fd_code, b.c_short_name, b.c_estabdate,
+           m.c_person_code, m.c_mgr_name,
            m.c_start_date, m.c_end_date, m.c_is_current
     FROM tb_fd_manager m
     JOIN tb_fd_basic_info b ON b.c_fd_code = m.c_fd_code
@@ -71,6 +74,72 @@ def _build_sheet1(df_history: pd.DataFrame) -> pd.DataFrame:
     out['开始时间'] = pd.to_datetime(out['开始时间']).dt.strftime('%Y%m%d')
     out['结束时间'] = pd.to_datetime(out['结束时间']).dt.strftime('%Y%m%d')
     out['结束时间'] = out['结束时间'].fillna('')  # 在任经理留空
+    return out
+
+
+# ── Sheet 3：经理变动分类 ────────────────────────────────────────
+
+_TYPE_ORDER = {'完全更换': 0, '部分更替': 1, '仅新增': 2, '完全未变': 3, '期间新成立': 4}
+
+
+def _build_sheet3(df_history: pd.DataFrame) -> pd.DataFrame:
+    """按基金统计 CUT_DATE 以来的经理变动类型"""
+    cut = pd.Timestamp(CUT_DATE)
+    df = df_history.copy()
+    df['c_start_date'] = pd.to_datetime(df['c_start_date'])
+    df['c_end_date'] = pd.to_datetime(df['c_end_date'])
+    df['c_estabdate'] = pd.to_datetime(df['c_estabdate'])
+
+    rows = []
+    for fd_code, grp in df.groupby('c_fd_code'):
+        name = grp['c_short_name'].iloc[0]
+        estab = grp['c_estabdate'].iloc[0]
+
+        # 期初经理集合（CUT_DATE 当日在任）
+        mask_start = (grp['c_start_date'] <= cut) & (
+            grp['c_end_date'].isna() | (grp['c_end_date'] > cut))
+        start_names = dict(zip(
+            grp.loc[mask_start, 'c_person_code'],
+            grp.loc[mask_start, 'c_mgr_name']))
+
+        # 期末经理集合（当前在任）
+        mask_end = grp['c_end_date'].isna()
+        end_names = dict(zip(
+            grp.loc[mask_end, 'c_person_code'],
+            grp.loc[mask_end, 'c_mgr_name']))
+
+        start_set = set(start_names)
+        end_set = set(end_names)
+
+        # 分类
+        if estab > cut:
+            ctype = '期间新成立'
+        elif start_set == end_set:
+            ctype = '完全未变'
+        elif start_set.issubset(end_set):
+            ctype = '仅新增'
+        elif start_set & end_set:
+            ctype = '部分更替'
+        else:
+            ctype = '完全更换'
+
+        new_mgrs = end_set - start_set
+        left_mgrs = start_set - end_set
+        all_names = {**start_names, **end_names}
+
+        rows.append({
+            '基金代码': fd_code,
+            '基金名称': name,
+            '变动类型': ctype,
+            '期初经理': ','.join(start_names[k] for k in sorted(start_set)),
+            '期末经理': ','.join(end_names[k] for k in sorted(end_set)),
+            '新增经理': ','.join(all_names[k] for k in sorted(new_mgrs)),
+            '离任经理': ','.join(all_names[k] for k in sorted(left_mgrs)),
+        })
+
+    out = pd.DataFrame(rows)
+    out['_sort'] = out['变动类型'].map(_TYPE_ORDER)
+    out = out.sort_values(['_sort', '基金代码']).drop(columns='_sort').reset_index(drop=True)
     return out
 
 
@@ -211,13 +280,19 @@ def run():
     sheet2 = _build_sheet2(df_history, df_current, df_category)
     logger.info(f"Sheet2 行数: {len(sheet2)}")
 
+    sheet3 = _build_sheet3(df_history)
+    logger.info(f"Sheet3 行数: {len(sheet3)}")
+    for t, cnt in sheet3['变动类型'].value_counts().items():
+        logger.info(f"  {t}: {cnt}")
+
     out_path = Path(__file__).parent / 'data' / '基金经理变动分析.xlsx'
     out_path.parent.mkdir(exist_ok=True)
     with pd.ExcelWriter(out_path, engine='openpyxl') as writer:
         sheet1.to_excel(writer, sheet_name='基金经理变动明细', index=False)
         sheet2.to_excel(writer, sheet_name='基金经理汇总', index=False)
+        sheet3.to_excel(writer, sheet_name='经理变动分类', index=False)
     logger.info(f"已保存至 {out_path}")
-    return sheet1, sheet2
+    return sheet1, sheet2, sheet3
 
 
 if __name__ == '__main__':
