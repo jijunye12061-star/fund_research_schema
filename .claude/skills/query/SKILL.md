@@ -81,21 +81,20 @@ curl -X POST https://tytapitest.1234567.com.cn/ty/sql \
 
 ## 模式 B：生成脚本
 
-生成完整可运行的 Python 脚本，保存到 `scripts/` 目录。
+生成完整可运行的 Python 脚本，保存到 `analysis/` 目录。
 
 ### 文件夹结构
 
-每个取数任务独立一个文件夹，格式 `scripts/YYYYMMDD_事项名/`：
+每个取数任务独立一个文件夹，格式 `analysis/YYYYMMDD_事项名/`：
 
 ```
-scripts/
+analysis/
   20260414_高仓位低换手基金筛选/
     query.py        ← 取数脚本
     data/           ← 输出文件（xlsx/csv）
     README.md       ← 需求说明文档
   20260410_中原农险赛道池打分/
     ...
-  archive/          ← 旧的扁平脚本归档
 ```
 
 **README.md 模板**（需求说明，写清楚背景和交付要求）：
@@ -179,12 +178,12 @@ doris.query_batch(sql, code_list, **other_params)
 ### 生成完毕后告知用户
 
 ```
-任务文件夹：scripts/YYYYMMDD_事项名/
+任务文件夹：analysis/YYYYMMDD_事项名/
 ├── query.py        ← 取数脚本（需要修改第 XX 行的 REPORT_DATE）
 ├── data/           ← 运行后输出到这里
 └── README.md       ← 需求说明（已填写）
 
-运行方式：python scripts/YYYYMMDD_事项名/query.py
+运行方式：python analysis/YYYYMMDD_事项名/query.py
 ```
 
 ---
