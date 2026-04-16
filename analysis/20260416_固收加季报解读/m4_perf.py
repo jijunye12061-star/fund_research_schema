@@ -151,7 +151,7 @@ def _build_company_avg(detail: pd.DataFrame) -> pd.DataFrame:
             return np.nan
         return (r[mask] * w[mask]).sum() / w[mask].sum()
 
-    grp = sub.groupby('基金公司').apply(wavg).rename('加权平均当季收益%').reset_index()
+    grp = sub.groupby('基金公司').apply(wavg, include_groups=False).rename('加权平均当季收益%').reset_index()
     grp = grp.merge(company_scale.rename('管理规模(亿)').reset_index(), on='基金公司')
     grp['加权平均当季收益%'] = grp['加权平均当季收益%'].round(2)
     grp['管理规模(亿)'] = grp['管理规模(亿)'].round(2)

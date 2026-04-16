@@ -55,6 +55,8 @@ def _fetch_index_prices(doris: DorisConnector) -> pd.DataFrame:
     with doris.engine.connect() as conn:
         from sqlalchemy import text
         df = pd.read_sql(text(sql), conn, params=params)
+    # 统一转为 datetime64，避免与字符串比较时类型不匹配
+    df['c_trade_date'] = pd.to_datetime(df['c_trade_date'])
     return df
 
 
@@ -73,15 +75,15 @@ def _build_index_sheet(price_df: pd.DataFrame) -> pd.DataFrame:
             continue
 
         # YTD 起始：>= YEAR_START 的最早一条
-        ytd_sub = sub[sub['c_trade_date'] >= YEAR_START]
+        ytd_sub = sub[sub['c_trade_date'] >= pd.Timestamp(YEAR_START)]
         ytd_open = ytd_sub.iloc[0]['c_close'] if not ytd_sub.empty else None
 
         # 当季起始：<= PREV_DATE 的最后一条
-        qtr_open_sub = sub[sub['c_trade_date'] <= PREV_DATE]
+        qtr_open_sub = sub[sub['c_trade_date'] <= pd.Timestamp(PREV_DATE)]
         qtr_open = qtr_open_sub.iloc[-1]['c_close'] if not qtr_open_sub.empty else None
 
         # 当季末：<= REPORT_DATE 的最后一条
-        qtr_close_sub = sub[sub['c_trade_date'] <= REPORT_DATE]
+        qtr_close_sub = sub[sub['c_trade_date'] <= pd.Timestamp(REPORT_DATE)]
         qtr_close = qtr_close_sub.iloc[-1]['c_close'] if not qtr_close_sub.empty else None
 
         def pct(end, start):
@@ -110,7 +112,9 @@ def _fetch_cb_prem(doris: DorisConnector) -> pd.DataFrame:
       AND c_conv_prem_rate IS NOT NULL
     ORDER BY c_trade_date
     """
-    return doris.query(sql, report_date=REPORT_DATE)
+    df = doris.query(sql, report_date=REPORT_DATE)
+    df['c_trade_date'] = pd.to_datetime(df['c_trade_date'])
+    return df
 
 
 def _build_cb_sheet(cb_df: pd.DataFrame) -> pd.DataFrame:
@@ -118,8 +122,8 @@ def _build_cb_sheet(cb_df: pd.DataFrame) -> pd.DataFrame:
     计算两个报告期的转股溢价率中位数，以及期末在历史（2020年以来）的分位数
     """
     rows = []
-    for label, dt in [('上期（' + PREV_DATE + '）', PREV_DATE),
-                      ('本期（' + REPORT_DATE + '）', REPORT_DATE)]:
+    for label, dt in [('上期（' + PREV_DATE + '）', pd.Timestamp(PREV_DATE)),
+                      ('本期（' + REPORT_DATE + '）', pd.Timestamp(REPORT_DATE))]:
         day_df = cb_df[cb_df['c_trade_date'] == dt]
         if day_df.empty:
             # 取最近一个有数据的交易日
