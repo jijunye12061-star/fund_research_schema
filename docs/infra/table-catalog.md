@@ -18,6 +18,8 @@
 | tb_fd_portfolio_stk | 基金股票持仓，`c_style` 区分季报/半年报/年报 | 视图，实时 |
 | tb_fd_portfolio_bd | 基金债券持仓 | 视图，实时 |
 | tb_fd_manager | 基金经理任职信息 | 按需同步 |
+| tb_fd_holder_structure | 基金持有人结构，机构/个人/员工持有比例及份额，含 A/C 各份额 | 视图，实时（DBA 配置中） |
+| tb_fd_holder_top10 | 基金前十大持有人明细，含持有人类型/份额/比例 | 视图，实时（DBA 配置中） |
 | tb_stk_basic_info | A股证券基本信息，含上市退市日期 | 按需全量 |
 | tb_stk_basic_info_hk | 港股证券基本信息 | 按需全量 |
 | tb_stk_industry_hk | 港股行业归属（申万/中信/港交所/GICS） | 按需全量 |
