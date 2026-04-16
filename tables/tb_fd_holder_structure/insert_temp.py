@@ -34,7 +34,7 @@
     CREATE TABLE tytdata.tb_fd_holder_top10 (
         c_report_date  DATE          NOT NULL,
         c_fd_code      VARCHAR(20)   NOT NULL,
-        c_rank         TINYINT       NOT NULL,
+        c_rank         SMALLINT      NOT NULL,
         c_style        VARCHAR(20),
         c_holder_name  VARCHAR(300),
         c_holder_type  VARCHAR(30),
