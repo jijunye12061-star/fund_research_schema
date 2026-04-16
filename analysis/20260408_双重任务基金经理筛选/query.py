@@ -1,27 +1,11 @@
 """
 同时管理主动权益基金和二级债基的基金经理名单
 
-输出6列：
+输出列：
   基金经理名称 | 权益基金代码 | 权益基金名称 | 二级债基代码 | 二级债基名称
   | 二级债基规模(亿) | 今年以来收益率(%) | 今年以来最大回撤(%)
 """
-import sys
 from pathlib import Path
-
-
-def _setup_path():
-    for parent in Path(__file__).resolve().parents:
-        if (parent / 'utils' / 'db_connector.py').exists():
-            sys.path.insert(0, str(parent))
-            return
-    ds_resource = Path("dolphinscheduler/default/resources/jjy")
-    if (ds_resource / 'utils' / 'db_connector.py').exists():
-        sys.path.insert(0, str(ds_resource))
-        return
-    raise RuntimeError("找不到 utils 目录")
-
-
-_setup_path()
 
 import pandas as pd
 from utils.db_connector import DorisConnector
@@ -169,9 +153,8 @@ def run():
 
     output['二级债基规模(亿)'] = output['二级债基规模(亿)'].round(2)
 
-    out_dir = Path(__file__).resolve().parent.parent / 'data'
-    out_dir.mkdir(exist_ok=True)
-    out_path = out_dir / 'dual_mandate_managers.xlsx'
+    out_path = Path(__file__).parent / 'data' / 'dual_mandate_managers.xlsx'
+    out_path.parent.mkdir(exist_ok=True)
     output.to_excel(out_path, index=False)
 
     logger.info(f"共 {len(output)} 行，已保存至 {out_path}")

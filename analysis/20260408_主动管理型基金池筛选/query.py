@@ -22,18 +22,7 @@
 输出：data/active_fund_pool.xlsx（5个 Sheet）
   基金数量统计 / 基金公司规模 / 全量三类基金 / 基础筛选后 / 初选池-全市场50%
 """
-import sys
 from pathlib import Path
-
-
-def _setup_path():
-    for parent in Path(__file__).resolve().parents:
-        if (parent / 'utils' / 'db_connector.py').exists():
-            sys.path.insert(0, str(parent))
-            return
-
-
-_setup_path()
 
 import pandas as pd
 from utils.db_connector import DorisConnector, OracleConnector
@@ -425,7 +414,7 @@ def run():
     df_all['c_sector'] = df_all['c_sector'].fillna('全市场')
 
     # ── 写 Excel ─────────────────────────────────────────────────────────────
-    out_path = Path(__file__).resolve().parent.parent / 'data' / 'active_fund_pool.xlsx'
+    out_path = Path(__file__).parent / 'data' / 'active_fund_pool.xlsx'
     out_path.parent.mkdir(exist_ok=True)
 
     with pd.ExcelWriter(out_path, engine='openpyxl') as writer:
