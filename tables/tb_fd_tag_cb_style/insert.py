@@ -246,7 +246,9 @@ def _query_cb_balance_mkt(oracle: OracleConnector, trade_date: str) -> pd.DataFr
     WHERE TDATE = TO_DATE(:trade_date, 'YYYY-MM-DD')
       AND UNTRANSFER_AMT > 0
     """
-    return oracle.query(sql, trade_date=trade_date)
+    df = oracle.query(sql, trade_date=trade_date)
+    df.columns = df.columns.str.lower()
+    return df
 
 
 def _query_stk_barra(doris: DorisConnector, trade_date: str) -> pd.DataFrame:
