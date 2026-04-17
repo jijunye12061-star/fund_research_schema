@@ -100,13 +100,18 @@ def _weighted_avg(weights, returns):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _fetch_universe(doris, report_date: str) -> pd.DataFrame:
-    """获取固收+基金池（主代码去重）"""
+    """获取固收+基金池：官方分类一级债基+二级债基，主代码去重"""
     sql = """
-    SELECT f.c_fd_code, f.c_type2_code, b.c_short_name AS c_fd_name
-    FROM tb_fd_category f
-    JOIN tb_fd_basic_info b ON b.c_fd_code = f.c_fd_code
-    WHERE f.c_type1_code = '002'
-      AND f.c_report_date = :report_date
+    SELECT b.c_fd_code,
+           COALESCE(f.c_type2_code, '') AS c_type2_code,
+           b.c_short_name AS c_fd_name,
+           CASE WHEN b.c_class3_code = '003002001' THEN '混合债券型一级基金'
+                WHEN b.c_class3_code = '003002002' THEN '混合债券型二级基金'
+           END AS c_fd_type
+    FROM tb_fd_basic_info b
+    LEFT JOIN tb_fd_category f
+           ON f.c_fd_code = b.c_fd_code AND f.c_report_date = :report_date
+    WHERE b.c_class3_code IN ('003002001', '003002002')
       AND (b.c_init_code = b.c_fd_code OR b.c_init_code IS NULL)
     """
     return doris.query(sql, report_date=report_date)
@@ -271,7 +276,7 @@ def _classify(df_univ: pd.DataFrame,
 
     # ── 转债基金直接归类 ──
     cb_funds = df_univ.loc[df_univ['c_type2_code'] == '002001', 'c_fd_code'].tolist()
-    results.extend({'c_fd_code': fd, 'vol_type': '转债'} for fd in cb_funds)
+    results.extend({'c_fd_code': fd, 'vol_type': '可转债基金'} for fd in cb_funds)
 
     # ── 其余基金 ──
     other_codes = df_univ.loc[df_univ['c_type2_code'] != '002001', 'c_fd_code']
@@ -289,12 +294,12 @@ def _classify(df_univ: pd.DataFrame,
 
     # ── 低波: 含权仓位 < 5% ──
     low_mask = other['equity_exp'] < LOW_VOL_EQUITY_THRESH
-    results.extend({'c_fd_code': fd, 'vol_type': '低波'}
+    results.extend({'c_fd_code': fd, 'vol_type': '低波固收+'}
                    for fd in other.loc[low_mask, 'c_fd_code'])
 
     # ── 高波: 股票 > 40% ──
     high_mask = (~low_mask) & (other['c_stk_ratio'] > HIGH_VOL_STK_THRESH)
-    results.extend({'c_fd_code': fd, 'vol_type': '高波'}
+    results.extend({'c_fd_code': fd, 'vol_type': '高波固收+'}
                    for fd in other.loc[high_mask, 'c_fd_code'])
 
     # ── 核心样本: 排名 → 1:1:1 ──
@@ -317,13 +322,13 @@ def _classify(df_univ: pd.DataFrame,
     # 等分三组
     try:
         core['vol_type'] = pd.qcut(core['composite'], q=3,
-                                   labels=['低波', '中波', '高波'])
+                                   labels=['低波固收+', '中波固收+', '高波固收+'])
     except ValueError:
         # 样本太少或分位数重合时退化处理
         n = len(core)
         t = n // 3
         core = core.sort_values('composite')
-        labels = ['低波'] * t + ['中波'] * t + ['高波'] * (n - 2 * t)
+        labels = ['低波固收+'] * t + ['中波固收+'] * t + ['高波固收+'] * (n - 2 * t)
         core['vol_type'] = labels
 
     results.extend(core[['c_fd_code', 'vol_type']].to_dict('records'))
@@ -543,9 +548,9 @@ def _aggregate(qr_list: list, doris) -> pd.DataFrame:
         agg['cb_win_rate'] = np.nan
         agg['cb_pos_rate'] = np.nan
 
-    # ── 基金名称 ──
+    # ── 基金名称 + 官方基金类型 ──
     last_report = QUARTERS[-1]['report']
-    df_names = _fetch_universe(doris, last_report)[['c_fd_code', 'c_fd_name']]
+    df_names = _fetch_universe(doris, last_report)[['c_fd_code', 'c_fd_name', 'c_fd_type']]
     agg = agg.reset_index().merge(df_names, on='c_fd_code', how='left')
 
     return agg
@@ -620,7 +625,10 @@ def run():
                         f"中债新综合={idx_rets[IDX_BD]:.4f}")
 
             # 8) 当期配置（Brinson 组合权重）
-            df_alloc_cur = df_alloc_4q[df_alloc_4q['c_report_date'] == rd].copy()
+            # c_report_date 从 DB 读出为 'YYYY-MM-DD HH:MM:SS' 字符串，需截取前10位再比较
+            df_alloc_cur = df_alloc_4q[
+                df_alloc_4q['c_report_date'].astype(str).str[:10] == rd
+            ].copy()
 
             # 9) 归因
             qr = _brinson_quarter(fund_rets, stk_port_rets, cb_port_rets,
@@ -639,17 +647,22 @@ def run():
         out_path = Path(__file__).parent / 'data' / '固收加收益归因.xlsx'
         out_path.parent.mkdir(exist_ok=True)
 
-        # 格式化
-        pct_cols = ['abs_ret', 'excess_ret', 'alloc_ret', 'select_ret',
+        # 格式化（保留小数形式，与参考文件一致；胜率保持 0~1）
+        ret_cols = ['abs_ret', 'excess_ret', 'alloc_ret', 'select_ret',
                     'trade_ret', 'rp_cb', 'rp_stk']
-        for c in pct_cols:
-            final[c] = (final[c] * 100).round(2)
+        for c in ret_cols:
+            final[c] = final[c].round(6)
         for c in ['cb_win_rate', 'cb_pos_rate']:
             if c in final.columns:
-                final[c] = (final[c] * 100).round(0)
+                final[c] = final[c].round(4)
+
+        # 派生波动程度列（低/中/高，可转债基金留空）
+        vol_map = {'低波固收+': '低', '中波固收+': '中', '高波固收+': '高', '可转债基金': ''}
+        final['vol_level'] = final['vol_type'].map(vol_map).fillna('')
 
         col_rename = {
-            'c_fd_code': '基金代码', 'c_fd_name': '基金名称', 'vol_type': '类型',
+            'c_fd_code': '证券代码', 'c_fd_name': '基金简称', 'c_fd_type': '基金类型',
+            'vol_type': '分类', 'vol_level': '波动程度',
             'abs_ret': '绝对收益', 'excess_ret': '超额收益',
             'alloc_ret': '配置收益', 'select_ret': '选券收益', 'trade_ret': '交易收益',
             'rp_cb': '实际转债仓位归一化收益率', 'rp_stk': '实际股票仓位归一化收益率',
@@ -661,9 +674,9 @@ def run():
         # 季度明细
         detail = pd.concat(quarter_results, ignore_index=True)
         detail_pct = detail.copy()
-        for c in pct_cols:
+        for c in ret_cols:
             if c in detail_pct.columns:
-                detail_pct[c] = (detail_pct[c] * 100).round(4)
+                detail_pct[c] = detail_pct[c].round(6)
 
         # 基准权重
         df_bw = pd.DataFrame(bench_w_log)
