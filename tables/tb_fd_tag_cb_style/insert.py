@@ -210,7 +210,7 @@ def _query_stk_industry(doris: DorisConnector, stk_codes: List[str],
     if not stk_codes:
         return pd.DataFrame(columns=['c_stk_code', 'c_trade_date', 'c_ind_code'])
     sql = """
-    SELECT c_stk_code, c_trade_date, c_ind_code
+    SELECT c_stk_code, c_trade_date, SUBSTR(c_citic_code, 1, 6) AS c_ind_code
     FROM tytdata.tb_stk_industry
     WHERE c_stk_code IN (:code_list)
       AND c_trade_date = :d
