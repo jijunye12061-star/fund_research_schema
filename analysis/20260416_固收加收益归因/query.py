@@ -654,7 +654,7 @@ def run():
             final[c] = final[c].round(6)
         for c in ['cb_win_rate', 'cb_pos_rate']:
             if c in final.columns:
-                final[c] = final[c].round(4)
+                final[c] = pd.to_numeric(final[c], errors='coerce').round(4)
 
         # 派生波动程度列（低/中/高，可转债基金留空）
         vol_map = {'低波固收+': '低', '中波固收+': '中', '高波固收+': '高', '可转债基金': ''}
