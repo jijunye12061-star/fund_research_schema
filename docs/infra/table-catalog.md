@@ -71,6 +71,7 @@
 | tb_fd_tag_stk_region_sector | 股票区域/板块标签（双触发） | 综合 |
 | tb_fd_tag_stk_style | 股票投资风格标签（Barra 因子） | 半年度 |
 | tb_fd_tag_stk_portfolio | 股票组合特征标签，7 维 26 字段（双触发） | 综合 |
+| tb_fd_tag_cb_style | 固收+基金转债投资风格标签，5 维 40 字段 | 季度 |
 
 ---
 
