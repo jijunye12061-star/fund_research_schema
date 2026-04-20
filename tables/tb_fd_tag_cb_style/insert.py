@@ -115,13 +115,13 @@ def _get_near_trade_dates(doris: DorisConnector, q_dates: List[str]) -> Dict[str
 
 def _get_fund_universe(doris: DorisConnector, report_date: str,
                        q_dates: List[str]) -> List[str]:
-    """固收+(002)主代码基金，近8期 c_bd_convertible_ratio 均值 ≥ 1%"""
+    """权益/固收+/混合(001/002/004)主代码基金，近8期 c_bd_convertible_ratio 均值 ≥ 1%"""
     sql_base = """
     SELECT DISTINCT c.c_fd_code
     FROM tytdata.tb_fd_category c
     JOIN tytdata.tb_fd_basic_info b ON c.c_fd_code = b.c_fd_code
     WHERE c.c_report_date = :report_date
-      AND c.c_type1_code = '002'
+      AND c.c_type1_code IN ('001', '002', '004')
       AND (b.c_init_code = b.c_fd_code OR b.c_init_code IS NULL)
     """
     base = doris.query(sql_base, report_date=report_date)
@@ -148,7 +148,7 @@ def _get_fund_universe(doris: DorisConnector, report_date: str,
     ratio_df = doris.query_batch(sql_ratio, code_list=fund_codes,
                                  start_date=q_dates[0], end_date=q_dates[-1])
     valid = ratio_df[ratio_df['avg_cb_ratio'] >= 1]['c_fd_code'].tolist()
-    logger.info(f"固收+基金 {len(fund_codes)} 只 → 近8期CB均值≥1% 共 {len(valid)} 只")
+    logger.info(f"001/002/004基金 {len(fund_codes)} 只 → 近8期CB均值≥1% 共 {len(valid)} 只")
     return valid
 
 

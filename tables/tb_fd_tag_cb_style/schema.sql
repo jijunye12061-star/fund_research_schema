@@ -40,9 +40,9 @@ CREATE TABLE tytdata.tb_fd_tag_cb_style (
     c_cb_equity_like_ratio DECIMAL(10,4) COMMENT '平底溢价率≥20%的CB占比(%)',
     c_cb_attr_tag VARCHAR(10) COMMENT '属性标签:偏债/偏股/均衡',
     c_cb_equity_score DECIMAL(10,4) COMMENT '转股溢价率全市场分位加权均值(0~1),越低股性越强',
-    c_cb_equity_tag VARCHAR(10) COMMENT '股性标签:股性强/股性中等/股性弱',
+    c_cb_equity_tag VARCHAR(12) COMMENT '股性标签:股性强/股性中等/股性弱',
     c_cb_bond_score DECIMAL(10,4) COMMENT '纯债溢价率全市场分位加权均值(0~1),越低债性越强',
-    c_cb_bond_tag VARCHAR(10) COMMENT '债性标签:债性强/债性中等/债性弱',
+    c_cb_bond_tag VARCHAR(12) COMMENT '债性标签:债性强/债性中等/债性弱',
     c_cb_balance_score DECIMAL(10,4) COMMENT '余额全市场分位加权均值(0~1)',
     c_cb_balance_tag VARCHAR(10) COMMENT '余额标签:高余额/中余额/低余额',
 
