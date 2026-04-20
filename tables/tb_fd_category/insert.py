@@ -39,7 +39,8 @@ from utils.log import setup_logger
 logger = setup_logger(__name__)
 
 # ============================================================
-ENV = "${db_env}"  # 切换环境: 'dev' | 'prod'
+_env = "${db_env}"
+ENV = _env if not _env.startswith("${") else "dev"  # 调度注入db_env参数；本地默认dev
 # ============================================================
 
 class FundCategory(Enum):
