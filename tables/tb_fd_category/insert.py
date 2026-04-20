@@ -39,7 +39,7 @@ from utils.log import setup_logger
 logger = setup_logger(__name__)
 
 # ============================================================
-ENV = 'dev'  # 切换环境: 'dev' | 'prod'
+ENV = "${db_env}"  # 切换环境: 'dev' | 'prod'
 # ============================================================
 
 class FundCategory(Enum):
@@ -539,15 +539,18 @@ def run(report_date: str):
     return results
 
 if __name__ == '__main__':
-    import sys
     from utils.common import should_run, ReportFreq
-    if len(sys.argv) > 1:
-        raw = sys.argv[1]
-        calc_date = f'{raw[:4]}-{raw[4:6]}-{raw[6:]}'
-        ok, report_date = should_run(calc_date, ReportFreq.QUARTERLY)
-        if ok:
-            run(report_date)
+
+    # ── 调度模式 ──────────────────────────────────────────
+    raw = "${biz_date}"
+    calc_date = f'{raw[:4]}-{raw[4:6]}-{raw[6:]}'
+    ok, report_date = should_run(calc_date, ReportFreq.QUARTERLY)
+    if ok:
+        logger.info(f"触发执行，报告期={report_date}")
+        run(report_date)
     else:
-        # 历史补数：2015-03-31 起，44 期季度
-        for dt in generate_report_dates('2025-12-31', 44):
-            run(dt)
+        logger.info(f"非披露窗口，跳过（calc_date={calc_date}）")
+
+    # ── 历史补数模式（补数时：注释上面，取消注释下面）──────
+    # for report_date in generate_report_dates('2025-12-31', 44):
+    #     run(report_date)
