@@ -71,8 +71,8 @@ description: >
 
 **DS 兼容性**
 - `_setup_path()` 在文件最顶部、import 之前调用
-- `__main__` 的 `sys.argv[1]` 日期格式（DS 传入格式是否与 `parse_biz_date` 匹配）
-- `ENV = 'dev'` 确认存在
+- `__main__` 的 DS 调度块使用 `"$[yyyyMMdd-1]"` 模板变量 + 字符串切片转换日期格式
+- ENV 使用参数注入 + 本地 fallback：`_env = "${db_env}"; ENV = _env if not _env.startswith("${") else "dev"`
 
 ### 阶段四：补数
 
@@ -129,11 +129,12 @@ def _setup_path():
 _setup_path()  # 必须在所有 utils import 之前调用
 
 from utils.db_connector import OracleConnector, DorisConnector
-from utils.common import parse_biz_date
 from utils.log import setup_logger
 
 logger = setup_logger(__name__)
-ENV = 'dev'
+
+_env = "${db_env}"
+ENV = _env if not _env.startswith("${") else "dev"  # DS 注入 db_env；本地默认 dev
 
 
 def run(calc_date: str):
@@ -142,18 +143,33 @@ def run(calc_date: str):
 
 
 if __name__ == '__main__':
-    run(parse_biz_date(sys.argv[1]) if len(sys.argv) > 1 else '2026-01-01')
+    # ── DS 调度模式 ──────────────────────────────────────────────────
+    raw = "$[yyyyMMdd-1]"
+    run(f"{raw[:4]}-{raw[4:6]}-{raw[6:]}")
+
+    # ── 历史补数模式（补数时：注释上面，取消注释下面）────────────────
+    # run('2026-01-01')
 ```
 
 **季度/半年度表**（如标签表）用 `run(report_date: str)` + `should_run()` 门控：
 
 ```python
-from utils.common import should_run, ReportFreq
+from utils.common import should_run, ReportFreq, generate_report_dates
 
 if __name__ == '__main__':
-    calc_date = parse_biz_date(sys.argv[1]) if len(sys.argv) > 1 else '2026-01-01'
-    if should_run(calc_date, ReportFreq.SEMI_ANNUAL):
-        run(calc_date)
+    # ── DS 调度模式 ──────────────────────────────────────────────────
+    raw = "$[yyyyMMdd-1]"
+    calc_date = f"{raw[:4]}-{raw[4:6]}-{raw[6:]}"
+    ok, report_date = should_run(calc_date, ReportFreq.QUARTERLY)
+    if ok:
+        logger.info(f"触发执行，报告期={report_date}")
+        run(report_date)
+    else:
+        logger.info(f"非披露窗口，跳过（calc_date={calc_date}）")
+
+    # ── 历史补数模式（补数时：注释上面，取消注释下面）────────────────
+    # for report_date in generate_report_dates('2025-12-31', N):
+    #     run(report_date)
 ```
 
 ---
@@ -175,17 +191,19 @@ DDL 块顺序：`UNIQUE KEY → COMMENT → PARTITION BY → DISTRIBUTED BY → 
 ## 远程 SQL 探查
 
 ```bash
-# Doris（默认）
-curl -X POST https://tytapitest.1234567.com.cn/ty/sql \
-  -H "Authorization: Bearer $REMOTE_SQL_TOKEN" \
+# Doris测试（db=43）
+curl -s -X POST http://metabase.jg/api/dataset \
+  -H "X-API-KEY: $METABASE_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"sql": "SELECT * FROM tb_fd_basic_info LIMIT 5"}'
+  -d '{"database":43,"type":"native","native":{"template-tags":{},"query":"SELECT * FROM tb_fd_basic_info LIMIT 5"},"parameters":[]}' \
+  | python -c "import json,sys; d=json.load(sys.stdin); cols=[c['name'] for c in d['data']['cols']]; [print(dict(zip(cols,r))) for r in d['data']['rows']]"
 
-# Oracle
-curl -X POST https://tytapitest.1234567.com.cn/ty/sql \
-  -H "Authorization: Bearer $REMOTE_SQL_TOKEN" \
+# Oracle投研通（db=39）
+curl -s -X POST http://metabase.jg/api/dataset \
+  -H "X-API-KEY: $METABASE_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"sql": "SELECT COLUMN_NAME FROM ALL_TAB_COLUMNS WHERE OWNER=:1 AND TABLE_NAME=:2", "db": "oracle", "params": ["TYTFUND", "FUND_IV_STOCKINVESTO"]}'
+  -d '{"database":39,"type":"native","native":{"template-tags":{"owner":{"name":"owner","type":"text"},"tbl":{"name":"tbl","type":"text"}},"query":"SELECT COLUMN_NAME FROM ALL_TAB_COLUMNS WHERE OWNER={{owner}} AND TABLE_NAME={{tbl}} AND ROWNUM<=5"},"parameters":[{"type":"category","value":"TYTFUND","target":["variable",["template-tag","owner"]]},{"type":"category","value":"FUND_IV_STOCKINVESTO","target":["variable",["template-tag","tbl"]]}]}' \
+  | python -c "import json,sys; d=json.load(sys.stdin); cols=[c['name'] for c in d['data']['cols']]; [print(dict(zip(cols,r))) for r in d['data']['rows']]"
 ```
 
 - 优先查 Doris（更快，不影响 Oracle 生产库）

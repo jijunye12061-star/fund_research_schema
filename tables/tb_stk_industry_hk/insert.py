@@ -31,7 +31,8 @@ from utils.log import setup_logger
 logger = setup_logger(__name__)
 
 # ============================================================
-ENV = 'dev'
+_env = "${db_env}"
+ENV = _env if not _env.startswith("${") else "dev"  # 调度注入db_env参数；本地默认dev
 # ============================================================
 
 # (前缀, 目标列名)

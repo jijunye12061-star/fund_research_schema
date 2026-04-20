@@ -38,7 +38,8 @@ from utils.log import setup_logger
 logger = setup_logger(__name__)
 
 # ============================================================
-ENV = 'dev'
+_env = "${db_env}"
+ENV = _env if not _env.startswith("${") else "dev"  # 调度注入db_env参数；本地默认dev
 # ============================================================
 
 CITIC_PREFIX = '025'
@@ -161,7 +162,11 @@ def run(calc_date: str, events: pd.DataFrame = None) -> None:
 
 
 if __name__ == '__main__':
+    # ── DS 调度模式 ──────────────────────────────────────────────────
+    raw = "$[yyyyMMdd-1]"
+    run(f"{raw[:4]}-{raw[4:6]}-{raw[6:]}")
+
+    # ── 历史补数模式（补数时：注释上面，取消注释下面）────────────────
     # main_events = _query_events('2026-03-17')
     # for dt in get_trade_calendar('2015-01-01', '2026-03-17'):
     #     run(dt.strftime('%Y-%m-%d'), main_events)
-    run('2026-03-16')

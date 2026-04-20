@@ -49,7 +49,8 @@ from utils.log import setup_logger
 logger = setup_logger(__name__)
 
 # ============================================================
-ENV = 'dev'  # 切换环境: 'dev' | 'prod'
+_env = "${db_env}"
+ENV = _env if not _env.startswith("${") else "dev"  # 调度注入db_env参数；本地默认dev
 # ============================================================
 
 # ==================== 配置 ====================
@@ -343,9 +344,9 @@ def run(calc_date: str):
 
 
 if __name__ == '__main__':
-    import sys
-    if len(sys.argv) > 1:
-        raw = sys.argv[1]
-        run(f'{raw[:4]}-{raw[4:6]}-{raw[6:]}')
-    else:
-        run('2026-04-09')  # 单日手动触发，无补数循环
+    # ── DS 调度模式 ──────────────────────────────────────────────────
+    raw = "$[yyyyMMdd-1]"
+    run(f"{raw[:4]}-{raw[4:6]}-{raw[6:]}")
+
+    # ── 历史补数模式（补数时：注释上面，取消注释下面）────────────────
+    # run('2026-04-09')

@@ -38,7 +38,8 @@ from utils.log import setup_logger
 logger = setup_logger(__name__)
 
 # ============================================================
-ENV = 'dev'
+_env = "${db_env}"
+ENV = _env if not _env.startswith("${") else "dev"  # 调度注入db_env参数；本地默认dev
 # ============================================================
 
 CONCEPT_PREFIX = '007'
@@ -166,12 +167,11 @@ def run(calc_date: str, events: pd.DataFrame = None) -> None:
 
 
 if __name__ == '__main__':
-    if len(sys.argv) > 1:
-        raw = sys.argv[1]
-        run(f'{raw[:4]}-{raw[4:6]}-{raw[6:]}')
-    else:
-        run('2026-04-09')  # 单日手动触发
-        # 历史补数（按需运行）：
-        # main_events = _query_events('2026-04-09')
-        # for dt in get_trade_calendar('2015-01-05', '2026-04-09'):
-        #     run(dt.strftime('%Y-%m-%d'), main_events)
+    # ── DS 调度模式 ──────────────────────────────────────────────────
+    raw = "$[yyyyMMdd-1]"
+    run(f"{raw[:4]}-{raw[4:6]}-{raw[6:]}")
+
+    # ── 历史补数模式（补数时：注释上面，取消注释下面）────────────────
+    # main_events = _query_events('2026-04-09')
+    # for dt in get_trade_calendar('2015-01-05', '2026-04-09'):
+    #     run(dt.strftime('%Y-%m-%d'), main_events)

@@ -136,53 +136,59 @@ if ok:
 
 ## 四、标准 `__main__` 模板
 
+DS 通过模板变量 `$[yyyyMMdd-1]`（前一日）将日期硬编码替换进脚本。补数时手动注释调度块、取消注释补数块。
+
+> `$[yyyyMMdd-1]` 中的偏移量由 DS DAG 配置决定，不同 DAG 可能不同（如同日触发用 `$[yyyyMMdd]`），写代码时保持和 DS 配置一致即可。
+
 ### 季度表（DS 调度 + 补数）
 
 ```python
 if __name__ == '__main__':
-    import sys
-    if len(sys.argv) > 1:
-        # DS 调度入口
-        raw = sys.argv[1]
-        calc_date = f'{raw[:4]}-{raw[4:6]}-{raw[6:]}'
-        ok, report_date = should_run(calc_date, ReportFreq.QUARTERLY)
-        if ok:
-            run(report_date)
+    # ── DS 调度模式 ──────────────────────────────────────────────────
+    raw = "$[yyyyMMdd-1]"
+    calc_date = f"{raw[:4]}-{raw[4:6]}-{raw[6:]}"
+    ok, report_date = should_run(calc_date, ReportFreq.QUARTERLY)
+    if ok:
+        logger.info(f"触发执行，报告期={report_date}")
+        run(report_date)
     else:
-        # 历史补数
-        hist_dates = generate_report_dates('2025-12-31', N)  # N = 目标期数
-        for dt in hist_dates:
-            run(dt)
+        logger.info(f"非披露窗口，跳过（calc_date={calc_date}）")
+
+    # ── 历史补数模式（补数时：注释上面，取消注释下面）────────────────
+    # for report_date in generate_report_dates('2025-12-31', N):  # N = 目标期数
+    #     run(report_date)
 ```
 
-> **规范**：`run()` 统一接受 `report_date`，日期转换由 `should_run` 负责，`run()` 内部不做转换。
+> **规范**：`run()` 统一接受 `report_date`（`%Y-%m-%d`），日期转换由 `should_run` 负责，`run()` 内部不做转换。
 
 ### 半年度表（DS 调度 + 补数）
 
 ```python
 if __name__ == '__main__':
-    import sys
-    if len(sys.argv) > 1:
-        raw = sys.argv[1]
-        calc_date = f'{raw[:4]}-{raw[4:6]}-{raw[6:]}'
-        ok, report_date = should_run(calc_date, ReportFreq.SEMI_ANNUAL)
-        if ok:
-            run(report_date)
+    # ── DS 调度模式 ──────────────────────────────────────────────────
+    raw = "$[yyyyMMdd-1]"
+    calc_date = f"{raw[:4]}-{raw[4:6]}-{raw[6:]}"
+    ok, report_date = should_run(calc_date, ReportFreq.SEMI_ANNUAL)
+    if ok:
+        logger.info(f"触发执行，报告期={report_date}")
+        run(report_date)
     else:
-        # 历史补数：只取半年报期（偶数索引）
-        hist_dates = generate_report_dates('2025-12-31', N * 2)[::2]
-        for dt in hist_dates:
-            run(dt)
+        logger.info(f"非披露窗口，跳过（calc_date={calc_date}）")
+
+    # ── 历史补数模式（补数时：注释上面，取消注释下面）────────────────
+    # hist_dates = generate_report_dates('2025-12-31', N * 2)[::2]  # 只取半年报期
+    # for report_date in hist_dates:
+    #     run(report_date)
 ```
 
 ### 日频表
 
 ```python
 if __name__ == '__main__':
-    import sys
-    if len(sys.argv) > 1:
-        raw = sys.argv[1]
-        run(f'{raw[:4]}-{raw[4:6]}-{raw[6:]}')
-    else:
-        run('2026-04-09')  # 单日手动触发，无补数循环
+    # ── DS 调度模式 ──────────────────────────────────────────────────
+    raw = "$[yyyyMMdd-1]"
+    run(f"{raw[:4]}-{raw[4:6]}-{raw[6:]}")
+
+    # ── 历史补数模式（补数时：注释上面，取消注释下面）────────────────
+    # run('2026-04-09')
 ```

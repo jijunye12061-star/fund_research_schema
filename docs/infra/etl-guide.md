@@ -96,8 +96,8 @@ jjy/
 
 ### 日期参数
 
-- DS 传入格式：`%Y%m%d`（如 `20260106`）
-- 脚本内部统一使用：`%Y-%m-%d`，在 `__main__` 入口处用 `parse_biz_date()` 转换
+- DS 通过模板变量将日期直接替换进脚本，格式 `%Y%m%d`（如 `$[yyyyMMdd-1]` → `20260106`）
+- 脚本内部用字符串切片转换：`f"{raw[:4]}-{raw[4:6]}-{raw[6:]}"`
 - 完整的 `__main__` 模板（含 `should_run` 和补数循环）见 [调度指南](scheduling-guide.md)
 
 ## 新表数据验证工作流
@@ -116,10 +116,16 @@ jjy/
 从源表取 1-2 个基金的真实数据，按计算公式手算，与 insert.py 的逻辑对齐：
 
 ```bash
-# 拉 Oracle 源数据
-curl -X POST .../ty/sql -d '{"sql": "...", "db": "oracle"}'
-# 拉 Doris 分母/参考数据
-curl -X POST .../ty/sql -d '{"sql": "..."}'
+# 拉 Oracle 源数据（db=39，线上投研通）
+curl -s -X POST http://metabase.jg/api/dataset \
+  -H "X-API-KEY: $METABASE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"database":39,"type":"native","native":{"template-tags":{},"query":"..."},"parameters":[]}'
+# 拉 Doris 分母/参考数据（db=43，测试Doris）
+curl -s -X POST http://metabase.jg/api/dataset \
+  -H "X-API-KEY: $METABASE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"database":43,"type":"native","native":{"template-tags":{},"query":"..."},"parameters":[]}'
 ```
 
 ### 步骤三：运行测试期（2期）

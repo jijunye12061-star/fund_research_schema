@@ -32,7 +32,8 @@ from typing import List
 from utils.db_connector import OracleConnector, DorisConnector
 
 # ============================================================
-ENV = 'dev'  # 切换环境: 'dev' | 'prod'
+_env = "${db_env}"
+ENV = _env if not _env.startswith("${") else "dev"  # 调度注入db_env参数；本地默认dev
 # ============================================================
 
 logger = logging.getLogger(__name__)
@@ -226,13 +227,16 @@ def run(report_date: str) -> None:
 
 if __name__ == '__main__':
     from utils.common import generate_report_dates, should_run, ReportFreq
-    if len(sys.argv) > 1:
-        raw = sys.argv[1]
-        calc_date = f'{raw[:4]}-{raw[4:6]}-{raw[6:]}'
-        ok, report_date = should_run(calc_date, ReportFreq.SEMI_ANNUAL)
-        if ok:
-            run(report_date)
+    # ── DS 调度模式 ──────────────────────────────────────────────────
+    raw = "$[yyyyMMdd-1]"
+    calc_date = f"{raw[:4]}-{raw[4:6]}-{raw[6:]}"
+    ok, report_date = should_run(calc_date, ReportFreq.SEMI_ANNUAL)
+    if ok:
+        logger.info(f"触发执行，报告期={report_date}")
+        run(report_date)
     else:
-        # 历史補数：2015-06-30 起，22 期半年报
-        for dt in generate_report_dates('2025-12-31', 44)[::2]:
-            run(dt)
+        logger.info(f"非披露窗口，跳过（calc_date={calc_date}）")
+
+    # ── 历史补数模式（补数时：注释上面，取消注释下面）────────────────
+    # for dt in generate_report_dates('2025-12-31', 44)[::2]:
+    #     run(dt)

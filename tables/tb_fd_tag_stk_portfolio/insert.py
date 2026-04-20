@@ -30,7 +30,8 @@ from utils.log import setup_logger, step
 logger = setup_logger(__name__)
 _step = partial(step, logger)
 
-ENV = 'dev'
+_env = "${db_env}"
+ENV = _env if not _env.startswith("${") else "dev"  # 调度注入db_env参数；本地默认dev
 
 _YAML_PATH = Path(__file__).resolve().parent.parent / 'tb_fd_tag_stk_region_sector' / 'sector_mapping.yaml'
 with open(_YAML_PATH, 'r', encoding='utf-8') as f:
@@ -823,24 +824,25 @@ def run(calc_date: str) -> None:
 
 
 if __name__ == '__main__':
-    import sys as _sys
+    # ── DS 调度模式 ──────────────────────────────────────────────────
+    # 调度规则：
+    #   季报触发  (~Q末+15工作日): 更新季报级字段 + 半年报级字段前向填充
+    #   半年报触发(~Q末+60/90日):  重跑同一报告期，补全全持仓字段(持股扩新)，UNIQUE KEY 覆盖
+    raw = "$[yyyyMMdd-1]"
+    calc_date = f"{raw[:4]}-{raw[4:6]}-{raw[6:]}"
 
-    if len(_sys.argv) > 1:
-        # DS 调度入口：传入 '20250630' 格式，每日触发，由 should_run 决定是否执行
-        # 调度规则：
-        #   季报触发  (~Q末+15工作日): 更新季报级字段 + 半年报级字段前向填充
-        #   半年报触发(~Q末+60/90日):  重跑同一报告期，补全全持仓字段(持股扩新)，UNIQUE KEY 覆盖
-        calc_date = _sys.argv[1]
-        calc_date = f'{calc_date[:4]}-{calc_date[4:6]}-{calc_date[6:]}'
+    ok_q, report_date_q = should_run(calc_date, ReportFreq.QUARTERLY)
+    ok_s, report_date_s = should_run(calc_date, ReportFreq.SEMI_ANNUAL)
 
-        ok, report_date = should_run(calc_date, ReportFreq.QUARTERLY)
-        if ok:
-            run(report_date)
+    if ok_q:
+        logger.info(f"季报触发执行，报告期={report_date_q}")
+        run(report_date_q)
+    if ok_s:
+        logger.info(f"半年报触发执行，报告期={report_date_s}")
+        run(report_date_s)
+    if not ok_q and not ok_s:
+        logger.info(f"非披露窗口，跳过（calc_date={calc_date}）")
 
-        ok, report_date = should_run(calc_date, ReportFreq.SEMI_ANNUAL)
-        if ok:
-            run(report_date)
-    else:
-        # 历史補数：2016-12-31 起，37 期季度
-        for dt in generate_report_dates('2025-12-31', 37):
-            run(dt)
+    # ── 历史补数模式（补数时：注释上面，取消注释下面）────────────────
+    # for dt in generate_report_dates('2025-12-31', 37):
+    #     run(dt)
