@@ -396,6 +396,36 @@ def run():
         (today - mgr_all['c_mgr_curr_fund_start']).dt.days / 365
     ).round(1)
 
+    # Sheet3 超额/得分：用全量基金、同赛道中位数计算（不受 Step1 筛选影响）
+    df_sector_all = (
+        pd.DataFrame({'c_fd_code': df_universe['c_fd_code'].tolist()})
+        .merge(df_topic, on='c_fd_code', how='left')
+    )
+    df_sector_all['c_sector'] = df_sector_all['c_sector'].fillna('全市场')
+    perf_for_all = perf_wide_all.merge(df_sector_all, on='c_fd_code', how='left')
+    perf_for_all['c_sector'] = perf_for_all['c_sector'].fillna('全市场')
+
+    score_all_groups = []
+    for sector, grp in perf_for_all.groupby('c_sector', sort=False):
+        g = grp.copy()
+        g['long_excess']  = g['long_ret']  - g['long_ret'].median()
+        g['short_excess'] = g['short_ret'] - g['short_ret'].median()
+        g['r_long']   = g['long_excess'].rank(pct=True, na_option='bottom')
+        g['r_short']  = g['short_excess'].rank(pct=True, na_option='bottom')
+        g['r_mdd']    = (-g['mdd_1y']).rank(pct=True, na_option='bottom')
+        g['r_sharpe'] = g['sharpe_1y'].rank(pct=True, na_option='bottom')
+        g['c_total_score'] = (
+            SCORE_WEIGHTS['long_excess']  * g['r_long']  +
+            SCORE_WEIGHTS['short_excess'] * g['r_short'] +
+            SCORE_WEIGHTS['neg_mdd']      * g['r_mdd']   +
+            SCORE_WEIGHTS['sharpe']       * g['r_sharpe']
+        )
+        score_all_groups.append(g)
+
+    df_score_all = pd.concat(score_all_groups, ignore_index=True)[
+        ['c_fd_code', 'long_excess', 'short_excess', 'mdd_1y', 'sharpe_1y', 'c_total_score']
+    ]
+
     df_all = (
         df_universe
         .merge(fund_scale_num[['c_fd_code', 'c_scale_bn']], on='c_fd_code', how='left')
@@ -405,11 +435,7 @@ def run():
             on='c_fd_code', how='left'
         )
         .merge(df_topic, on='c_fd_code', how='left')
-        .merge(
-            df_score[['c_fd_code', 'c_total_score', 'short_excess', 'long_excess']],
-            on='c_fd_code', how='left'
-        )
-        .merge(perf_wide_all[['c_fd_code', 'mdd_1y', 'sharpe_1y']], on='c_fd_code', how='left')
+        .merge(df_score_all, on='c_fd_code', how='left')
     )
     df_all['c_sector'] = df_all['c_sector'].fillna('全市场')
 
