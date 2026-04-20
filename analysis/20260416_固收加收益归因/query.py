@@ -113,6 +113,7 @@ def _fetch_universe(doris, report_date: str) -> pd.DataFrame:
            ON f.c_fd_code = b.c_fd_code AND f.c_report_date = :report_date
     WHERE b.c_class3_code IN ('003002001', '003002002')
       AND (b.c_init_code = b.c_fd_code OR b.c_init_code IS NULL)
+      AND b.c_terminate_date IS NULL
     """
     return doris.query(sql, report_date=report_date)
 
@@ -528,6 +529,11 @@ def _brinson_quarter(fund_rets: pd.Series,
 def _aggregate(qr_list: list, doris) -> pd.DataFrame:
     """八季度归因结果汇总"""
     all_df = pd.concat(qr_list, ignore_index=True)
+
+    # 剔除近8期股票+转债权重全为0的基金
+    has_equity = (all_df.groupby('c_fd_code')
+                  .apply(lambda g: ((g['wp_stk'] + g['wp_cb']) > 0).any()))
+    all_df = all_df[all_df['c_fd_code'].isin(has_equity[has_equity].index)]
 
     # ── 收益率列简单加总 ──
     sum_cols = ['abs_ret', 'excess_ret', 'alloc_ret', 'select_ret',
