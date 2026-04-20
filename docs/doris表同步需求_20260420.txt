@@ -1,0 +1,138 @@
+业务需求：基金研究、AI问答项目以及客户需求需要
+源头库：master.tytdb.db:10086/tytdb
+目标库：master.jgdoris.db:10096/tytdata 和 10.189.18.47:10096/tytdata
+同步频率：实时映射（视图）
+同步时间：无需定时，视图实时读取
+数据需求：
+见下面的SQL
+
+
+具体SQL：
+
+CREATE VIEW tytdata.tb_stk_basic_info (
+    c_stk_code     COMMENT '证券代码',
+    c_inner_code   COMMENT '证券内码',
+    c_company_code COMMENT '公司代码',
+    c_stk_name     COMMENT '证券简称',
+    c_stk_type     COMMENT '证券类型',
+    c_trade_market COMMENT '交易市场',
+    c_list_date    COMMENT '上市日期',
+    c_delist_date  COMMENT '退市日期',
+    c_list_status  COMMENT '上市状态'
+) COMMENT 'A股基本信息表' AS
+SELECT
+    SECURITYCODE        AS c_stk_code,
+    SECURITYVARIETYCODE AS c_inner_code,
+    COMPANYCODE         AS c_company_code,
+    SECURITYSHORTNAME   AS c_stk_name,
+    SECURITYTYPE        AS c_stk_type,
+    TRADEMARKET         AS c_trade_market,
+    LISTINGDATE         AS c_list_date,
+    ENDDATE             AS c_delist_date,
+    CASE LISTINGSTATE
+        WHEN '0'  THEN '正常上市'
+        WHEN '1'  THEN '暂停上市'
+        WHEN '2'  THEN '终止上市'
+        WHEN '3'  THEN '恢复上市'
+        WHEN '9'  THEN '未上市'
+        WHEN '10' THEN '资产重组弃用'
+        ELSE LISTINGSTATE
+    END                 AS c_list_status
+FROM TYTFUND.CDSY_SECUCODE
+WHERE SECURITYTYPECODE IN ('058001001', '058001008')
+  AND USESTATE = '1'
+  AND EISDEL = '0';
+
+CREATE VIEW tytdata.tb_stk_basic_info_hk (
+    c_stk_code     COMMENT '证券代码',
+    c_inner_code   COMMENT '证券内码',
+    c_company_code COMMENT '公司代码',
+    c_stk_name     COMMENT '证券简称',
+    c_stk_type     COMMENT '证券类型',
+    c_trade_market COMMENT '交易市场',
+    c_list_date    COMMENT '上市日期',
+    c_delist_date  COMMENT '退市日期',
+    c_list_status  COMMENT '上市状态'
+) COMMENT '港股基本信息表' AS
+SELECT
+    SECURITYCODE        AS c_stk_code,
+    SECURITYVARIETYCODE AS c_inner_code,
+    COMPANYCODE         AS c_company_code,
+    SECURITYSHORTNAME   AS c_stk_name,
+    SECURITYTYPE        AS c_stk_type,
+    TRADEMARKET         AS c_trade_market,
+    LISTINGDATE         AS c_list_date,
+    ENDDATE             AS c_delist_date,
+    CASE LISTINGSTATE
+        WHEN '0'  THEN '正常上市'
+        WHEN '1'  THEN '暂停上市'
+        WHEN '2'  THEN '终止上市'
+        WHEN '3'  THEN '恢复上市'
+        WHEN '9'  THEN '未上市'
+        WHEN '10' THEN '资产重组弃用'
+        ELSE LISTINGSTATE
+    END                 AS c_list_status
+FROM TYTFUND.CDSY_SECUCODE
+WHERE SECURITYTYPECODE IN (
+    '058001003001',
+    '058001003002',
+    '058001003003'
+)
+  AND USESTATE = '1'
+  AND EISDEL = '0';
+
+CREATE VIEW tytdata.tb_fd_holder_structure (
+    c_report_date    COMMENT '报告日期',
+    c_fd_code        COMMENT '基金代码',
+    c_notice_date    COMMENT '公告日期',
+    c_total_holder   COMMENT '持有人总户数',
+    c_holder_per     COMMENT '平均每户份额',
+    c_inst_share     COMMENT '机构持有份额',
+    c_inst_ratio     COMMENT '机构持有比例(%)',
+    c_retail_share   COMMENT '个人持有份额',
+    c_retail_ratio   COMMENT '个人持有比例(%)',
+    c_employee_share COMMENT '员工持有份额',
+    c_employee_ratio COMMENT '员工持有比例(%)',
+    c_feeder_share   COMMENT '联接基金持有份额',
+    c_feeder_ratio   COMMENT '联接基金持有比例(%)'
+) COMMENT '基金持有人结构表[机构研究]' AS
+SELECT
+    PDATE          AS c_report_date,
+    FCODE          AS c_fd_code,
+    NOTICEDATE     AS c_notice_date,
+    TOTALHOLDER    AS c_total_holder,
+    HOLDERPER      AS c_holder_per,
+    INSTHOLD       AS c_inst_share,
+    PCTINSTHOLD    AS c_inst_ratio,
+    PEISONHOLD     AS c_retail_share,
+    PCTPEISONHOLD  AS c_retail_ratio,
+    EMPLOYEHOLD    AS c_employee_share,
+    PCTEMPLOYEHOLD AS c_employee_ratio,
+    FUNDHOLD       AS c_feeder_share,
+    PCTFUNDHOLD    AS c_feeder_ratio
+FROM TYTFUND.FUND_HOLDCHANGE
+WHERE EISDEL = '0';
+
+CREATE VIEW tytdata.tb_fd_holder_top10 (
+    c_report_date  COMMENT '报告日期',
+    c_fd_code      COMMENT '基金代码',
+    c_rank         COMMENT '持有人名次',
+    c_style        COMMENT '报表类别',
+    c_holder_name  COMMENT '持有人名称',
+    c_holder_type  COMMENT '持有人类型',
+    c_hold_share   COMMENT '持有份额',
+    c_hold_ratio   COMMENT '持有比例(%)',
+    c_notice_date  COMMENT '公告日期'
+) COMMENT '基金前十大持有人明细表[机构研究]' AS
+SELECT
+    CHANGEDATE AS c_report_date,
+    FUNDCODE   AS c_fd_code,
+    RANK       AS c_rank,
+    STYLE      AS c_style,
+    SNAME      AS c_holder_name,
+    HOLDERTYPE AS c_holder_type,
+    HOLDFE     AS c_hold_share,
+    RATIO      AS c_hold_ratio,
+    NOTICEDATE AS c_notice_date
+FROM TYTFUND.FUND_HR_HOLDERTOP10
+WHERE EISDEL = '0';

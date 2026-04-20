@@ -112,37 +112,6 @@ def _get_snapshot(
     return active[['c_trade_date', 'c_stk_code', 'c_concept_code']]
 
 
-# ==================== 字典同步 ====================
-
-def sync_dict() -> None:
-    """同步概念板块字典到tb_dict_params"""
-    sql = """
-    SELECT PUBLISHCODE  AS c_param_code,
-           PUBLISHNAME  AS c_param_name,
-           INTRODUCE    AS c_remark
-    FROM NEWSADMIN.CDSY_KP_PUBLISHINDEX
-    WHERE PUBLISHCODE LIKE '007%'
-      AND ISENABLE = 1
-    """
-    with OracleConnector(ENV) as oracle:
-        df = oracle.query(sql)
-
-    df.columns = df.columns.str.lower()
-    df['c_param_type'] = '概念板块'
-    df['c_parent_code'] = '007'
-
-    with DorisConnector(ENV) as doris:
-        doris.execute(
-            "DELETE FROM tb_dict_params WHERE c_param_type = '概念板块'"
-        )
-        doris.insert('tb_dict_params', df[
-            ['c_param_type', 'c_param_code', 'c_param_name',
-             'c_parent_code', 'c_remark']
-        ])
-
-    logger.info(f"概念字典同步完成: {len(df)} 条")
-
-
 # ==================== 主入口 ====================
 
 def run(calc_date: str, events: pd.DataFrame = None) -> None:
