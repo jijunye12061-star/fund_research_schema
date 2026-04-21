@@ -398,11 +398,16 @@ def summarize_holder(holder_panel: pd.DataFrame) -> pd.DataFrame:
 
 def build_fund_perf_summary(monthly_ret: pd.DataFrame, panel: pd.DataFrame) -> pd.DataFrame:
     """
-    每只基金的年度 + 累计收益率
+    每只基金的年度 + 累计收益率（仅统计全程 12 季度均在固收加面板中的基金）
     返回: c_fd_code, ret_2023, ret_2024, ret_2025, ret_total,
            category（最新一期）, c_fd_name, c_company_name, c_manager_name
     """
-    mr = monthly_ret.copy()
+    # 只保留全程（12个季报截面）均在固收加池里的基金，排除中途切换类别的
+    fund_quarter_cnt = panel.groupby('c_fd_code')['report_date'].nunique()
+    stable_funds = fund_quarter_cnt[fund_quarter_cnt == len(QUARTER_DATES)].index
+    logger.info(f"全程稳定固收加基金: {len(stable_funds)} 只（过滤前 {panel['c_fd_code'].nunique()} 只）")
+
+    mr = monthly_ret[monthly_ret['c_fd_code'].isin(stable_funds)].copy()
     mr['year'] = mr['month'].str[:4]
 
     year_ret = (mr
@@ -433,11 +438,15 @@ def build_fund_perf_summary(monthly_ret: pd.DataFrame, panel: pd.DataFrame) -> p
 
 def build_size_increment(holder_panel: pd.DataFrame, fund_perf: pd.DataFrame) -> pd.DataFrame:
     """
-    24-12-31 → 25-12-31 规模增量排行
+    24-12-31 → 25-12-31 规模增量排行（只含全程稳定固收加基金）
     """
+    stable_codes = set(fund_perf['c_fd_code'].dropna())
+
     def _get_snapshot(rd):
-        return (holder_panel[holder_panel['report_date'] == rd]
-                [['c_init_code', 'category', 'total_aum', 'inst_aum']]
+        return (holder_panel[
+                    (holder_panel['report_date'] == rd) &
+                    (holder_panel['c_init_code'].isin(stable_codes))
+                ][['c_init_code', 'category', 'total_aum', 'inst_aum']]
                 .rename(columns={'total_aum': f'total_{rd[:4]}',
                                  'inst_aum': f'inst_{rd[:4]}'}))
 
