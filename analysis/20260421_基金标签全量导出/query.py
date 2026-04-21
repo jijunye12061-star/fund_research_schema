@@ -1,11 +1,11 @@
 """
-基金标签全量导出（按基金类型分 Sheet）
+基金标签全量导出（按基金类型输出独立 xlsx）
 
-输出 4 张 Sheet：
-  - 权益基金(001)：资产配置 / 区域板块 / 风格 / 组合 / 交易
-  - 固收+基金(002)：资产配置 / 债券风格 / 转债风格 / 权益持仓标签
-  - 债券基金(003)：债券风格（券种/信用/久期/杠杆）
-  - 混合基金(004)：资产配置 / 区域板块 / 风格 / 债券风格
+输出 4 个文件：
+  - 基金标签_主动权益_{date}.xlsx  (001, 仅 c_type2_code=001001)
+  - 基金标签_固收+_{date}.xlsx     (002)
+  - 基金标签_债券_{date}.xlsx      (003)
+  - 基金标签_混合_{date}.xlsx      (004)
 """
 from pathlib import Path
 import pandas as pd
@@ -22,6 +22,18 @@ OUT_DIR.mkdir(exist_ok=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 公共规模子查询（内联使用）
+# ─────────────────────────────────────────────────────────────────────────────
+_SCALE_SUB = """
+LEFT JOIN (
+    SELECT c_fd_code, c_report_date, MAX(c_fund_nav_total) AS c_fund_nav_total
+    FROM tb_fd_asset_allocation
+    WHERE c_style IN ('01', '03', '05', '06')
+    GROUP BY c_fd_code, c_report_date
+) sc ON sc.c_fd_code = cat.c_fd_code AND sc.c_report_date = cat.c_report_date"""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SQL 定义
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -30,7 +42,7 @@ SELECT
     b.c_fd_code,
     b.c_short_name,
     b.c_company_name,
-    cat.c_type2_name,
+    b.c_class3_name,
     b.c_manager_name,
     ROUND(sc.c_fund_nav_total / 100000000, 2) AS c_scale_bn,
     -- 资产配置
@@ -86,8 +98,9 @@ LEFT JOIN tb_fd_tag_stk_style sty
 LEFT JOIN tb_fd_tag_stk_portfolio pf
     ON pf.c_fd_code = cat.c_fd_code AND pf.c_report_date = cat.c_report_date
 WHERE cat.c_type1_code = '001'
+  AND cat.c_type2_code = '001001'
   AND cat.c_report_date = :report_date
-ORDER BY sc.c_fund_nav_total DESC
+ORDER BY b.c_fd_code ASC
 """
 
 _SQL_FI_PLUS = """
@@ -95,7 +108,7 @@ SELECT
     b.c_fd_code,
     b.c_short_name,
     b.c_company_name,
-    cat.c_type2_name,
+    b.c_class3_name,
     b.c_manager_name,
     ROUND(sc.c_fund_nav_total / 100000000, 2) AS c_scale_bn,
     -- 资产配置
@@ -155,7 +168,7 @@ LEFT JOIN tb_fd_tag_stk_style sty
     ON sty.c_fd_code = cat.c_fd_code AND sty.c_report_date = cat.c_report_date
 WHERE cat.c_type1_code = '002'
   AND cat.c_report_date = :report_date
-ORDER BY sc.c_fund_nav_total DESC
+ORDER BY b.c_fd_code ASC
 """
 
 _SQL_BOND = """
@@ -163,7 +176,7 @@ SELECT
     b.c_fd_code,
     b.c_short_name,
     b.c_company_name,
-    cat.c_type2_name,
+    b.c_class3_name,
     b.c_manager_name,
     ROUND(sc.c_fund_nav_total / 100000000, 2) AS c_scale_bn,
     -- 债券风格
@@ -192,7 +205,7 @@ LEFT JOIN tb_fd_tag_bd_style bd
     ON bd.c_fd_code = cat.c_fd_code AND bd.c_report_date = cat.c_report_date
 WHERE cat.c_type1_code = '003'
   AND cat.c_report_date = :report_date
-ORDER BY sc.c_fund_nav_total DESC
+ORDER BY b.c_fd_code ASC
 """
 
 _SQL_MIX = """
@@ -200,7 +213,7 @@ SELECT
     b.c_fd_code,
     b.c_short_name,
     b.c_company_name,
-    cat.c_type2_name,
+    b.c_class3_name,
     b.c_manager_name,
     ROUND(sc.c_fund_nav_total / 100000000, 2) AS c_scale_bn,
     -- 资产配置
@@ -256,7 +269,7 @@ LEFT JOIN tb_fd_tag_stk_portfolio pf
     ON pf.c_fd_code = cat.c_fd_code AND pf.c_report_date = cat.c_report_date
 WHERE cat.c_type1_code = '004'
   AND cat.c_report_date = :report_date
-ORDER BY sc.c_fund_nav_total DESC
+ORDER BY b.c_fd_code ASC
 """
 
 
@@ -268,7 +281,7 @@ _COMMON_COLS = {
     'c_fd_code':      '基金代码',
     'c_short_name':   '基金简称',
     'c_company_name': '基金公司',
-    'c_type2_name':   '投资类型',
+    'c_class3_name':  '投资类型',
     'c_manager_name': '基金经理',
     'c_scale_bn':     '规模(亿元)',
 }
@@ -392,10 +405,15 @@ _MIX_COLS = {
 
 def _fetch(doris: DorisConnector, sql: str, col_map: dict) -> pd.DataFrame:
     df = doris.query(sql, report_date=REPORT_DATE)
-    # 只保留 col_map 中有的列（防止SQL返回多余列）
     existing = [c for c in col_map if c in df.columns]
-    df = df[existing].rename(columns=col_map)
-    return df
+    return df[existing].rename(columns=col_map)
+
+
+def _save(df: pd.DataFrame, filename: str) -> Path:
+    path = OUT_DIR / filename
+    df.to_excel(path, index=False)
+    logger.info(f"已保存 {filename}  ({len(df)} 行)")
+    return path
 
 
 def run():
@@ -407,19 +425,14 @@ def run():
         df_mix     = _fetch(doris, _SQL_MIX,       _MIX_COLS)
 
     logger.info(
-        f"行数 — 权益:{len(df_equity)}  固收+:{len(df_fi_plus)}  "
+        f"行数 — 主动权益:{len(df_equity)}  固收+:{len(df_fi_plus)}  "
         f"债券:{len(df_bond)}  混合:{len(df_mix)}"
     )
 
-    out_path = OUT_DIR / f'基金标签全量_{REPORT_DATE}.xlsx'
-    with pd.ExcelWriter(out_path, engine='openpyxl') as writer:
-        df_equity.to_excel(writer,  sheet_name='权益基金',  index=False)
-        df_fi_plus.to_excel(writer, sheet_name='固收+基金', index=False)
-        df_bond.to_excel(writer,    sheet_name='债券基金',  index=False)
-        df_mix.to_excel(writer,     sheet_name='混合基金',  index=False)
-
-    logger.info(f"已保存至 {out_path}")
-    return out_path
+    _save(df_equity,  f'基金标签_主动权益_{REPORT_DATE}.xlsx')
+    _save(df_fi_plus, f'基金标签_固收+_{REPORT_DATE}.xlsx')
+    _save(df_bond,    f'基金标签_债券_{REPORT_DATE}.xlsx')
+    _save(df_mix,     f'基金标签_混合_{REPORT_DATE}.xlsx')
 
 
 if __name__ == '__main__':
