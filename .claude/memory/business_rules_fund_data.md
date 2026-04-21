@@ -70,6 +70,54 @@ type: project
 
 ---
 
+## 持有人结构规模计算（tb_fd_holder_structure）
+
+### 核心原则：不做主代码去重
+
+`tb_fd_holder_structure` 是**例外表**：A/C/B 各份额机构持有比例差异显著，必须按 `c_fd_code` 分别计算，不能合并到主代码口径。
+
+### 机构持有规模计算
+
+```sql
+-- 推荐：份额 × 单位净值（JOIN tb_fd_nav_daily）
+SELECT
+    h.c_fd_code,
+    h.c_report_date,
+    h.c_inst_share,
+    h.c_inst_ratio,
+    h.c_inst_share * n.c_nav AS c_inst_amount   -- 机构持有规模（元）
+FROM tb_fd_holder_structure h
+JOIN tb_fd_nav_daily n
+  ON n.c_fd_code = h.c_fd_code
+ AND n.c_trade_date = h.c_report_date           -- 报告期当日净值
+WHERE h.c_report_date = %s
+```
+
+- 净值用 `tb_fd_nav_daily.c_nav`（8位精度），比公开披露的3位小数精度高
+- 报告期（06-30 / 12-31）均为交易日，直接等值匹配无需偏移
+
+### 总份额的正确计算
+
+```sql
+-- 正确：明细字段求和
+c_inst_share + c_retail_share + c_employee_share + COALESCE(c_feeder_share, 0)
+
+-- 不要用这个（有系统误差）：
+c_total_holder * c_holder_per   -- holder_per 是截断均值，户数越多误差越大
+```
+
+验证数据（2025-12-31）：000003（3853户）误差约 0.075%，000004（2595户）误差约 0.0003%。
+
+### 跨份额合并口径（需要时）
+
+如需整只基金口径（A+C 合并），按份额规模加权：
+
+```sql
+SUM(c_inst_share * n.c_nav) / SUM((c_inst_share + c_retail_share + c_employee_share) * n.c_nav)
+```
+
+---
+
 ## c_hold_value vs c_nav_ratio
 
 - `c_hold_value`（持仓市值）：反映绝对规模影响，用于抱团度

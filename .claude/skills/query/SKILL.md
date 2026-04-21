@@ -13,16 +13,34 @@ description: >
 
 # Query — 基金数据库取数工作流
 
-## Step 0：判断模式
+## Step 0：识别场景
 
-**收到需求后先判断模式，再执行。** 两条路径完全不同：
+**收到需求后先判断两个维度，再决定路径：**
+
+### 维度一：是否客户需求？
+
+| 特征 | 客户需求 | 内部查数 |
+|------|---------|---------|
+| 用户说明 | 明确说"客户需求" | 未提及，或说"自己看看" |
+| 输出格式 | 楷体格式 Excel + 备注页 | 直接 `to_excel`，无格式 |
+| 执行前 | **必须先确认细节**（见下方清单） | 可直接执行 |
+
+**客户需求确认清单**（逐项与用户对齐，确认后再写代码）：
+- [ ] 基金范围：类型（二级债基/主动权益/…）、成立时间要求、运营状态
+- [ ] 主代码去重：通常必须，特殊表（如持有人结构）除外
+- [ ] 报告期：最新期 or 指定期，季报 or 半年报/年报口径
+- [ ] 数据内容：拉什么字段、哪几类指标、是否需要辅助字段（如总仓位）
+- [ ] 筛选条件：门槛值 or 全量输出
+- [ ] 排序方式：按什么降序/升序
+- [ ] 输出文件名
+
+### 维度二：直接查询 or 生成脚本？
 
 | 特征 | 模式 A：直接查询 | 模式 B：生成脚本 |
-|------|-----------------|-----------------|
-| 典型需求 | "查一下某基金的行业配置" | "筛选出满足xxx条件的基金" |
-| 结果规模 | 预计 ≤ 200 行，对话里能看清 | 多表关联、数据量大、需要 Excel 交付 |
-| 执行方式 | 直接 curl API，对话内展示结果 | 生成 `scripts/xxx.py`，告知用户路径和运行方式 |
-| 用户操作 | 无需操作 | 用户自己 `python scripts/xxx.py`，结果落 `data/` |
+|------|----------------|----------------|
+| 典型需求 | "查一下某基金的行业配置" | 多表关联、需要 Excel 交付 |
+| 结果规模 | ≤ 200 行，对话里能看清 | 数据量大或需落文件 |
+| 执行方式 | MetabaseConnector 现场执行，对话内展示 | 生成 `analysis/YYYYMMDD_xxx/query.py` |
 
 有歧义时问一句："你是要我这里直接查给你看，还是帮你生成脚本导出 Excel？"
 
@@ -32,99 +50,74 @@ description: >
 
 1. 读 `docs/infra/table-catalog.md`，识别相关表（通常 1-3 张）
 2. 读对应 `tables/tb_xxx/SPEC.md`，确认字段名、枚举值、JOIN 关系和 SQL 示例
-3. 字段含义仍不确定时，用 curl 抽样 5-10 行：
-   ```bash
-   curl -X POST https://tytapitest.1234567.com.cn/ty/sql \
-     -H "Authorization: Bearer $REMOTE_SQL_TOKEN" \
-     -H "Content-Type: application/json" \
-     -d '{"sql": "SELECT * FROM tb_xxx LIMIT 10"}'
+3. 字段含义仍不确定时，用 MetabaseConnector 抽样：
+   ```python
+   # 在 bash 里执行
+   python -c "
+   from utils.metabase import MetabaseConnector
+   with MetabaseConnector() as mb:           # DB_ORACLE=39 切换 Oracle
+       df = mb.query('SELECT * FROM tytdata.tb_xxx LIMIT 10')
+       print(df.to_string())
+   "
    ```
-4. 读 `.claude/skills/query/memory/MEMORY.md`，有已知坑直接应用，无需重复踩
+4. 读 `.claude/skills/query/memory/MEMORY.md`，有已知坑直接应用
 
 ---
 
 ## 模式 A：直接查询
 
-在对话里 curl 执行，展示实际行数 + 前 10 行关键列。
+用 MetabaseConnector 在 bash 里执行，对话内展示实际行数 + 关键列。
 
 ### SQL 规范
 
-```bash
-# Doris（默认）— 绑定变量用 %s
-curl -X POST https://tytapitest.1234567.com.cn/ty/sql \
-  -H "Authorization: Bearer $REMOTE_SQL_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"sql": "SELECT ... WHERE c_fd_code = %s LIMIT 100", "params": ["000001"]}'
+```python
+from utils.metabase import MetabaseConnector
 
-# Oracle — 绑定变量用 :1
-curl -X POST https://tytapitest.1234567.com.cn/ty/sql \
-  -H "Authorization: Bearer $REMOTE_SQL_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"sql": "SELECT ... WHERE FUNDCODE = :1 AND ROWNUM <= 5", "db": "oracle", "params": ["000001"]}'
+with MetabaseConnector() as mb:
+    df = mb.query("""
+    SELECT ...
+    FROM tytdata.tb_xxx f
+    JOIN tytdata.tb_fd_basic_info b ON b.c_fd_code = f.c_fd_code
+    WHERE (b.c_init_code = b.c_fd_code OR b.c_init_code IS NULL)
+      AND f.c_report_date = :report_date
+    """, report_date='2025-12-31')
+    print(f"{len(df)} 行")
+    print(df.head(10).to_string())
 ```
 
 **必须遵守的约定：**
 
-- 禁止 f-string 拼接参数，只用绑定变量
+- SQL 用 `:param_name` 命名绑定变量，对应 `mb.query(sql, param_name=value)`
 - 涉及基金维度时，必须主代码去重：
   ```sql
-  JOIN tb_fd_basic_info b ON b.c_fd_code = f.c_fd_code
+  JOIN tytdata.tb_fd_basic_info b ON b.c_fd_code = f.c_fd_code
   WHERE (b.c_init_code = b.c_fd_code OR b.c_init_code IS NULL)
   ```
 - c_style 互斥，不能混查：全持仓 `IN ('02','04')`；前十大 `IN ('01','03','05','06')`
-- 报告期精确匹配：`c_report_date = %s`，禁止 BETWEEN
-- API 最多返回 5000 行，数据量大时先聚合
-
-结果不符预期时，说明排查方向（字段单位？过滤条件？枚举值？）再试。
+- 报告期精确匹配：`c_report_date = :date`，禁止 BETWEEN
+- MetabaseConnector 自动分页（单次 2000 行限制），超出时自动翻页透明处理
+- 数据量大时优先在 SQL 层聚合，而非拉明细到 Python
 
 ---
 
 ## 模式 B：生成脚本
 
-生成完整可运行的 Python 脚本，保存到 `analysis/` 目录。
+生成完整可运行的 Python 脚本，保存到 `analysis/` 目录，**Claude 负责执行并验证结果**。
 
 ### 文件夹结构
 
-每个取数任务独立一个文件夹，格式 `analysis/YYYYMMDD_事项名/`：
-
 ```
 analysis/
-  20260414_高仓位低换手基金筛选/
-    query.py        ← 取数脚本
-    data/           ← 输出文件（xlsx/csv）
-    README.md       ← 需求说明文档
-  20260410_中原农险赛道池打分/
-    ...
+  20260421_二级债基有色煤炭商业航天持仓筛选/
+    query.py        ← 取数脚本（Claude 执行验证）
+    data/           ← 输出文件
+    README.md       ← 需求说明
 ```
 
-**README.md 模板**（需求说明，写清楚背景和交付要求）：
-
-```markdown
-# 事项名称
-
-## 需求背景
-[客户/内部需求的背景说明]
-
-## 交付要求
-- 筛选条件：...
-- 报告期：...
-- 输出字段：...
-
-## 输出文件
-- `data/xxx.xlsx`
-
-## 备注
-[特殊处理、数据质量问题等]
-```
-
-### 脚本模板
+### 脚本模板（内部查数）
 
 ```python
-"""
-[一句话说明脚本做什么]
-
-输出列：字段1 | 字段2 | ...
-"""
+"""[一句话说明] 输出列：字段1 | 字段2 | ..."""
 from pathlib import Path
 import pandas as pd
 from utils.db_connector import DorisConnector
@@ -133,69 +126,122 @@ from utils.log import setup_logger
 logger = setup_logger(__name__)
 ENV = 'dev'
 
-# ── 查询参数（按需修改）──────────────────────────────────────
 REPORT_DATE = 'YYYY-MM-DD'
 
 
 def _fetch_xxx(doris: DorisConnector) -> pd.DataFrame:
-    """说明"""
     sql = """
     SELECT ...
-    FROM tb_xxx f
-    JOIN tb_fd_basic_info b ON b.c_fd_code = f.c_fd_code
+    FROM tytdata.tb_xxx f
+    JOIN tytdata.tb_fd_basic_info b ON b.c_fd_code = f.c_fd_code
     WHERE (b.c_init_code = b.c_fd_code OR b.c_init_code IS NULL)
-      AND f.c_report_date = %s
+      AND f.c_report_date = :report_date
     """
-    return doris.query(sql, REPORT_DATE)
+    return doris.query(sql, report_date=REPORT_DATE)
 
 
 def run():
     with DorisConnector(ENV) as doris:
         df = _fetch_xxx(doris)
-
     logger.info(f"获取 {len(df)} 行")
-
-    out_path = Path(__file__).parent / 'data' / 'output_name.xlsx'
-    out_path.parent.mkdir(exist_ok=True)
-    df.to_excel(out_path, index=False)
-    logger.info(f"已保存至 {out_path}")
+    out = Path(__file__).parent / 'data' / 'output.xlsx'
+    out.parent.mkdir(exist_ok=True)
+    df.to_excel(out, index=False)          # 内部查数：直接输出，无格式
+    logger.info(f"已保存至 {out}")
     return df
-
 
 if __name__ == '__main__':
     run()
 ```
 
-> **与 insert.py 的区别**：取数脚本有 `ENV='dev'`，但不写 `_setup_path()`（无需 DS 环境），不写 `run(calc_date)` 签名（无调度参数），输出路径指向脚本所在文件夹的 `data/` 子目录。
+### 脚本模板（客户需求）
 
-**批量 IN 查询**（需要按列表过滤时）：
+客户需求在内部模板基础上，输出替换为 `to_client_excel`，并增加备注页。
+
 ```python
-# SQL 中写 IN (:code_list)
-sql = "SELECT ... FROM tb_xxx WHERE c_fd_code IN (:code_list)"
-doris.query_batch(sql, code_list, **other_params)
+"""[一句话说明] 输出列：字段1 | 字段2 | ..."""
+from pathlib import Path
+import pandas as pd
+from utils.db_connector import DorisConnector
+from utils.excel_writer import to_client_excel
+from utils.log import setup_logger
+
+logger = setup_logger(__name__)
+ENV = 'dev'
+
+REPORT_DATE = 'YYYY-MM-DD'
+
+
+def _fetch_xxx(doris: DorisConnector) -> pd.DataFrame:
+    sql = """..."""
+    return doris.query(sql, report_date=REPORT_DATE)
+
+
+def _build_notes() -> pd.DataFrame:
+    """备注内容：仅业务逻辑说明，不涉及字段名/表名/数据库术语"""
+    return pd.DataFrame([
+        ['报告期',   'YYYY年年报/季报（YYYY-MM-DD），使用全持仓 or 前十大重仓'],
+        ['基金范围', '...，成立满X个月且正常运营，按主代码去重'],
+        ['xxx 来源', '按...分类，基于A股持仓'],
+        ['权重口径', '各类持仓市值占基金净值总额的比例（%）'],
+        ['筛选条件', '...'],
+    ], columns=['说明项', '内容'])
+
+
+def run():
+    with DorisConnector(ENV) as doris:
+        df = _fetch_xxx(doris)
+    logger.info(f"获取 {len(df)} 行")
+
+    out = Path(__file__).parent / 'data' / 'output.xlsx'
+    to_client_excel(
+        path=out,
+        result_df=df,
+        notes_df=_build_notes(),
+        col_widths={'A': 11, 'B': 42, 'C': 24, ...},   # 按实际列宽填写
+        num_cols=['D', 'E', 'F'],                         # 数字列
+        result_sheet='筛选结果',
+    )
+    logger.info(f"已保存至 {out}")
+    return df
+
+if __name__ == '__main__':
+    run()
 ```
 
-### 生成完毕后告知用户
+### 执行流程
 
-```
-任务文件夹：analysis/YYYYMMDD_事项名/
-├── query.py        ← 取数脚本（需要修改第 XX 行的 REPORT_DATE）
-├── data/           ← 运行后输出到这里
-└── README.md       ← 需求说明（已填写）
+1. 生成脚本后，Claude **用 MetabaseConnector 直接执行核心查询验证逻辑**
+2. 数据量在 Metabase 限制内（或 SQL 层已聚合）→ 直接生成 Excel 到 `data/`
+3. 数据量超限且无法 SQL 聚合 → 告知用户需要 `python query.py` 走 DorisConnector
 
-运行方式：python analysis/YYYYMMDD_事项名/query.py
+### README.md 模板
+
+```markdown
+# 事项名称
+
+## 需求背景
+[背景说明]
+
+## 交付要求
+- 基金范围：...
+- 报告期：...
+- 输出字段：...
+- 筛选条件：...
+
+## 输出文件
+- `data/xxx.xlsx`（持仓筛选结果 + 备注）
+
+## 备注
+[特殊处理说明]
 ```
 
 ---
 
 ## Step 最后：任务收尾
 
-取数完成后主动检查，不要等用户提：
-
-1. **有无值得保存的经验**：字段陷阱/特殊过滤/JOIN 坑 → 写入 `.claude/skills/query/memory/`，更新 `MEMORY.md`
-2. **不值得保存的**：具体 SQL、参数值、结果数字、通用 Python/SQL 知识
-
-如果用户需要更全面的会话收尾（多个任务、跨场景），可输入 `/wrap`。
+1. **有无值得保存的经验**：字段陷阱/JOIN 坑/枚举值特殊情况 → 写入 `.claude/skills/query/memory/`
+2. **不值得保存的**：具体 SQL、参数值、结果数字、通用知识
 
 ---
 
@@ -208,4 +254,8 @@ doris.query_batch(sql, code_list, **other_params)
 | 主代码去重 | `c_init_code = c_fd_code OR c_init_code IS NULL` |
 | 全持仓 | `c_style IN ('02', '04')` |
 | 前十大持仓 | `c_style IN ('01', '03', '05', '06')` |
-| 报告期→最近交易日 | `SELECT c_max_trade_date FROM tb_trade_calendar WHERE c_date = %s` |
+| 报告期→最近交易日 | `SELECT c_max_trade_date FROM tb_trade_calendar WHERE c_date = :date` |
+| SQL 绑定变量 | DorisConnector/MetabaseConnector 统一用 `:param_name` + `**kwargs` |
+| MetabaseConnector | `from utils.metabase import MetabaseConnector`，自动分页，上限前自动翻页 |
+| 客户 Excel 输出 | `from utils.excel_writer import to_client_excel` |
+| 内部 Excel 输出 | `df.to_excel(path, index=False)` |
