@@ -5,12 +5,24 @@
 from pathlib import Path
 import matplotlib
 matplotlib.use('Agg')
+import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
-plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
-plt.rcParams['axes.unicode_minus'] = False
 import matplotlib.ticker as mticker
 import pandas as pd
 import numpy as np
+
+# 直接注册字体文件，绕过缓存索引的名称查找问题
+_FONT_FILES = [
+    Path(r'C:\Windows\Fonts\simhei.ttf'),
+    Path(r'C:\Windows\Fonts\msyh.ttc'),    # Microsoft YaHei
+    Path(r'C:\Windows\Fonts\simsun.ttc'),
+]
+for _f in _FONT_FILES:
+    if _f.exists():
+        fm.fontManager.addfont(str(_f))
+
+plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'SimSun', 'DejaVu Sans']
+plt.rcParams['axes.unicode_minus'] = False
 
 IMG_DIR = Path(__file__).parent / 'images'
 IMG_DIR.mkdir(exist_ok=True)
