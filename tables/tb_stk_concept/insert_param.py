@@ -33,7 +33,7 @@ def run():
     SELECT PUBLISHCODE        AS c_param_code,
            PUBLISHNAME        AS c_param_name,
            TO_CHAR(INTRODUCE) AS c_remark
-    FROM NEWSADMIN.CDSY_KP_PUBLISHINDEX
+    FROM TYTFUND.CDSY_KP_PUBLISHINDEX
     WHERE PUBLISHCODE LIKE '007%'
       AND ISENABLE = 1
       AND EISDEL = '0'

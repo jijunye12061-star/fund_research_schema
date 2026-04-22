@@ -31,6 +31,17 @@ HALF_YEAR_DATES = [
     '2025-06-30', '2025-12-31',
 ]
 
+# 报告期 → c_style 映射
+SEMI_ANNUAL_STYLE = {
+    '2023-12-31': '04', '2024-06-30': '02', '2024-12-31': '04',
+    '2025-06-30': '02', '2025-12-31': '04',
+}
+QUARTER_STYLE = {
+    '2023-03-31': '01', '2023-06-30': '05', '2023-09-30': '03', '2023-12-31': '06',
+    '2024-03-31': '01', '2024-06-30': '05', '2024-09-30': '03', '2024-12-31': '06',
+    '2025-03-31': '01', '2025-06-30': '05', '2025-09-30': '03', '2025-12-31': '06',
+}
+
 # 36 个月末自然日
 MONTH_ENDS = [
     '2023-01-31','2023-02-28','2023-03-31','2023-04-30','2023-05-31','2023-06-30',
@@ -482,6 +493,211 @@ def build_size_increment(holder_panel: pd.DataFrame, fund_perf: pd.DataFrame) ->
     return merged[available].sort_values('delta_total', ascending=False)
 
 
+# ── § 5 债基占比 ───────────────────────────────────────────────────────────────
+
+def build_debt_fund_ratio(doris, holder_summary: pd.DataFrame) -> pd.DataFrame:
+    """
+    固收加在全体债基中的规模占比（5 个半年截面）
+    分母 = 固收加（type1=002）+ 纯债型（type1=003）总规模
+    返回: report_date, fi_plus_aum, pure_debt_aum, total_debt_aum, fi_plus_ratio
+    """
+    frames = []
+    for rd in HALF_YEAR_DATES:
+        style = SEMI_ANNUAL_STYLE[rd]
+        sql = """
+        SELECT SUM(COALESCE(aa.c_fund_nav_total, 0)) / 1e8 AS pure_debt_aum
+        FROM tb_fd_category cat
+        JOIN tb_fd_basic_info b ON b.c_fd_code = cat.c_fd_code
+        JOIN tb_fd_asset_allocation aa
+            ON aa.c_fd_code = cat.c_fd_code
+           AND aa.c_report_date = cat.c_report_date
+           AND aa.c_style = :style
+        WHERE cat.c_report_date = :rd
+          AND cat.c_type1_code = '003'
+          AND (b.c_init_code = b.c_fd_code OR b.c_init_code IS NULL)
+          AND (b.c_terminate_date IS NULL OR b.c_terminate_date > :rd)
+        """
+        df = doris.query(sql, rd=rd, style=style)
+        pure = float(df.iloc[0]['pure_debt_aum']) if not df.empty else 0.0
+        frames.append({'report_date': rd, 'pure_debt_aum': pure})
+
+    ratio_df = pd.DataFrame(frames)
+
+    fi_aum = (holder_summary.groupby('report_date')['total_aum']
+              .sum().reset_index().rename(columns={'total_aum': 'fi_plus_aum'}))
+    ratio_df = ratio_df.merge(fi_aum, on='report_date', how='left')
+    ratio_df['total_debt_aum'] = ratio_df['pure_debt_aum'] + ratio_df['fi_plus_aum'].fillna(0)
+    ratio_df['fi_plus_ratio'] = (
+        ratio_df['fi_plus_aum'] / ratio_df['total_debt_aum'].replace(0, float('nan')) * 100
+    )
+    logger.info(f"债基占比:\n{ratio_df[['report_date','fi_plus_aum','total_debt_aum','fi_plus_ratio']].to_string(index=False)}")
+    return ratio_df
+
+
+# ── § 6 年度最大回撤 ────────────────────────────────────────────────────────────
+
+def calc_annual_mdd(monthly_ret: pd.DataFrame, panel: pd.DataFrame) -> pd.DataFrame:
+    """
+    从月度收益率近似计算各年最大回撤（月末净值序列法）
+    返回: c_fd_code, year, mdd（负数，小数）, category
+    """
+    mr = monthly_ret.copy()
+    mr['year'] = mr['month'].str[:4]
+
+    results = []
+    for (code, year), grp in mr.groupby(['c_fd_code', 'year']):
+        rets = grp.sort_values('month')['ret'].fillna(0).values
+        # 含期初 nav=1
+        navs = [1.0]
+        for r in rets:
+            navs.append(navs[-1] * (1 + r))
+        navs = pd.Series(navs)
+        running_max = navs.cummax()
+        dd = (navs / running_max - 1)
+        results.append({'c_fd_code': code, 'year': year, 'mdd': float(dd.min())})
+
+    mdd_df = pd.DataFrame(results)
+    latest_cat = (panel.sort_values('report_date')
+                       .groupby('c_fd_code')[['category']]
+                       .last().reset_index())
+    return mdd_df.merge(latest_cat, on='c_fd_code', how='left')
+
+
+# ── § 7 新发市场 ───────────────────────────────────────────────────────────────
+
+def build_new_issuance(panel: pd.DataFrame) -> pd.DataFrame:
+    """
+    从 panel 中提取 2023-2025 年新成立固收加基金的季度发行统计
+    返回: est_year, est_quarter, category, count
+    """
+    latest = (panel.sort_values('report_date')
+                   .groupby('c_fd_code').last().reset_index())
+
+    latest['c_estabdate'] = pd.to_datetime(latest['c_estabdate'], errors='coerce')
+    new_funds = latest[
+        (latest['c_estabdate'] >= '2023-01-01') &
+        (latest['c_estabdate'] <= '2025-12-31')
+    ].copy()
+
+    new_funds['est_year'] = new_funds['c_estabdate'].dt.year.astype(str)
+    new_funds['est_quarter'] = (
+        new_funds['c_estabdate'].dt.year.astype(str) + 'Q' +
+        new_funds['c_estabdate'].dt.quarter.astype(str)
+    )
+
+    grp = (new_funds.groupby(['est_year', 'est_quarter', 'category'])
+                    .size().reset_index(name='count'))
+    logger.info(f"新发统计（年度）:\n{new_funds.groupby('est_year').size().to_string()}")
+    return grp
+
+
+# ── § 8 大类资产配置 ────────────────────────────────────────────────────────────
+
+def build_asset_allocation(doris, panel: pd.DataFrame) -> pd.DataFrame:
+    """
+    5 个半年截面的大类资产中位数仓位（%）
+    返回: c_fd_code, report_date, category, stk_ratio, cb_ratio, pure_bd_ratio, cash_ratio
+    """
+    frames = []
+    for rd in HALF_YEAR_DATES:
+        style = SEMI_ANNUAL_STYLE[rd]
+        codes = panel[panel['report_date'] == rd]['c_fd_code'].tolist()
+        if not codes:
+            continue
+
+        sql = """
+        SELECT
+            aa.c_fd_code,
+            COALESCE(aa.c_stk_total_ratio, 0)      AS stk_ratio,
+            COALESCE(aa.c_bd_total_ratio, 0)        AS bd_total_ratio,
+            COALESCE(aa.c_bd_convertible_ratio, 0)  AS cb_ratio,
+            COALESCE(aa.c_cash_total_ratio, 0)      AS cash_ratio
+        FROM tb_fd_asset_allocation aa
+        WHERE aa.c_report_date = :rd
+          AND aa.c_style = :style
+          AND aa.c_fd_code IN (:code_list)
+          AND aa.c_fund_nav_total > 0
+        """
+        df = doris.query_batch(sql, codes, rd=rd, style=style)
+        if df.empty:
+            continue
+
+        df['pure_bd_ratio'] = df['bd_total_ratio'] - df['cb_ratio']
+        cat_map = dict(zip(
+            panel[panel['report_date'] == rd]['c_fd_code'],
+            panel[panel['report_date'] == rd]['category'],
+        ))
+        df['category'] = df['c_fd_code'].map(cat_map)
+        df['report_date'] = rd
+        frames.append(df[['c_fd_code', 'report_date', 'category',
+                           'stk_ratio', 'cb_ratio', 'pure_bd_ratio', 'cash_ratio']])
+        logger.info(f"  {rd}: {len(df)} 只基金资产配置数据")
+
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
+# ── § 9 重仓股行业配置 ──────────────────────────────────────────────────────────
+
+def _fetch_industry_names(doris) -> pd.DataFrame:
+    sql = """
+    SELECT c_param_code AS ind_l1_code, c_param_name AS ind_l1_name
+    FROM tb_dict_params
+    WHERE c_param_type = '中信行业分类'
+      AND LENGTH(c_param_code) = 6
+    """
+    return doris.query(sql)
+
+
+def build_sector_allocation(doris, panel: pd.DataFrame) -> pd.DataFrame:
+    """
+    12 个季报截面的重仓股行业配置（中信一级行业，按基金 c_nav_ratio 汇总）
+    返回: c_fd_code, report_date, category, ind_l1_code, ind_l1_name, ind_nav_ratio
+    """
+    ind_names = _fetch_industry_names(doris)
+    frames = []
+    for rd in QUARTER_DATES:
+        style = QUARTER_STYLE[rd]
+        codes = panel[panel['report_date'] == rd]['c_fd_code'].tolist()
+        if not codes:
+            continue
+
+        sql = """
+        SELECT
+            p.c_fd_code,
+            LEFT(i.c_citic_code, 6) AS ind_l1_code,
+            SUM(p.c_nav_ratio)      AS ind_nav_ratio
+        FROM tb_fd_portfolio_stk p
+        JOIN tb_stk_industry i
+            ON i.c_stk_code = p.c_stk_code
+           AND i.c_trade_date = p.c_report_date
+        WHERE p.c_report_date = :rd
+          AND p.c_style = :style
+          AND p.c_fd_code IN (:code_list)
+          AND i.c_citic_code IS NOT NULL
+          AND i.c_citic_code != ''
+        GROUP BY p.c_fd_code, LEFT(i.c_citic_code, 6)
+        """
+        df = doris.query_batch(sql, codes, rd=rd, style=style)
+        if df.empty:
+            continue
+
+        df = df.merge(ind_names, on='ind_l1_code', how='left')
+        cat_map = dict(zip(
+            panel[panel['report_date'] == rd]['c_fd_code'],
+            panel[panel['report_date'] == rd]['category'],
+        ))
+        df['category'] = df['c_fd_code'].map(cat_map)
+        df['report_date'] = rd
+        frames.append(df)
+        logger.info(f"  {rd}: {len(df)} 行行业持仓数据")
+
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
 # ── 输出 ──────────────────────────────────────────────────────────────────────
 
 def export_excel(
@@ -492,6 +708,11 @@ def export_excel(
     panel,
     fund_perf,
     size_inc,
+    debt_ratio=None,
+    mdd_df=None,
+    new_iss=None,
+    asset_alloc=None,
+    sector_alloc=None,
 ):
     out_path = OUT_DIR / '固收加整体分析.xlsx'
     with pd.ExcelWriter(out_path, engine='openpyxl') as writer:
@@ -534,6 +755,29 @@ def export_excel(
         )
         migration_wide.to_excel(writer, sheet_name='8_分类迁移')
 
+        if debt_ratio is not None and not debt_ratio.empty:
+            debt_ratio.round(2).to_excel(writer, sheet_name='9_债基占比', index=False)
+
+        if mdd_df is not None and not mdd_df.empty:
+            mdd_summary = (mdd_df.groupby(['year', 'category'])['mdd']
+                           .median().reset_index().rename(columns={'mdd': 'mdd_median'}))
+            mdd_summary['mdd_median'] = (mdd_summary['mdd_median'] * 100).round(2)
+            mdd_summary.to_excel(writer, sheet_name='10_年度MDD', index=False)
+
+        if new_iss is not None and not new_iss.empty:
+            new_iss.to_excel(writer, sheet_name='11_新发市场', index=False)
+
+        if asset_alloc is not None and not asset_alloc.empty:
+            alloc_summary = (asset_alloc.groupby('report_date')[
+                ['stk_ratio', 'cb_ratio', 'pure_bd_ratio', 'cash_ratio']
+            ].median().round(2))
+            alloc_summary.to_excel(writer, sheet_name='12_大类资产')
+
+        if sector_alloc is not None and not sector_alloc.empty:
+            sector_summary = (sector_alloc.groupby(['report_date', 'ind_l1_name'])['ind_nav_ratio']
+                              .median().reset_index().rename(columns={'ind_nav_ratio': 'median_weight'}))
+            sector_summary.to_excel(writer, sheet_name='13_行业配置', index=False)
+
     logger.info(f"Excel 已保存至 {out_path}")
     return out_path
 
@@ -562,6 +806,21 @@ def run():
         fund_perf = build_fund_perf_summary(monthly_ret, panel)
         size_inc = build_size_increment(holder_panel, fund_perf)
 
+        logger.info("=== § 5 债基占比（P0）===")
+        debt_ratio = build_debt_fund_ratio(doris, holder_summary)
+
+        logger.info("=== § 6 年度MDD（P0）===")
+        mdd_df = calc_annual_mdd(monthly_ret, panel)
+
+        logger.info("=== § 7 新发市场（P1）===")
+        new_iss = build_new_issuance(panel)
+
+        logger.info("=== § 8 大类资产配置（P1）===")
+        asset_alloc = build_asset_allocation(doris, panel)
+
+        logger.info("=== § 9 重仓股行业配置（P1）===")
+        sector_alloc = build_sector_allocation(doris, panel)
+
     logger.info("=== 输出图表 ===")
     charts.plot_category_count(cls_summary)
     charts.plot_monthly_median_return(median_df)
@@ -572,11 +831,21 @@ def run():
     charts.plot_inst_ratio_trend(holder_summary)
     charts.plot_delta_bar(size_inc)
     charts.plot_size_vs_ret(size_inc)
+    # P0
+    charts.plot_debt_fund_ratio(debt_ratio)
+    charts.plot_annual_mdd_trend(mdd_df)
+    charts.plot_ret_mdd_scatter(fund_perf, mdd_df)
+    # P1
+    charts.plot_new_issuance(new_iss)
+    charts.plot_asset_allocation(asset_alloc)
+    charts.plot_sector_allocation(sector_alloc)
     logger.info("图表已保存至 images/")
 
     logger.info("=== 输出 Excel ===")
     export_excel(cls_summary, holder_summary, holder_panel,
-                 monthly_ret, panel, fund_perf, size_inc)
+                 monthly_ret, panel, fund_perf, size_inc,
+                 debt_ratio=debt_ratio, mdd_df=mdd_df, new_iss=new_iss,
+                 asset_alloc=asset_alloc, sector_alloc=sector_alloc)
 
     logger.info("=== 完成 ===")
 
