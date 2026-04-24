@@ -25,13 +25,27 @@ ENV = 'dev'
 # ============================================================
 # 参数配置（每次只改这里）
 # ============================================================
-LATEST_REPORT_DATE = '2025-12-31'   # 最新报告期（季度末）
+LATEST_REPORT_DATE = '2025-12-31'   # 最新数据报告期（可以是任意季度末）
 N_PERIODS          = 18             # 最近N个季度报告期（个股持仓用）
-FUND_UNIVERSE_DATE = '2025-12-31'   # tb_fd_category 基金池快照日期
 ESTAB_CUTOFF       = '2023-04-20'   # 成立满3年截止日
 NAV_START_YEAR     = 2021           # 净值起始年份
 NAV_END_DATE       = '2026-04-17'   # 净值截止日
 # ============================================================
+
+# 基金池仅在中报/年报披露后更新，自动映射到最近的半年报/年报日期：
+#   Q1 (03-31) → 上一年 12-31
+#   Q2 (06-30) → 本年   06-30
+#   Q3 (09-30) → 本年   06-30
+#   Q4 (12-31) → 本年   12-31
+def _semi_annual_snapshot(report_date: str) -> str:
+    d = pd.Timestamp(report_date)
+    if d.month <= 3:
+        return f'{d.year - 1}-12-31'
+    if d.month <= 9:
+        return f'{d.year}-06-30'
+    return f'{d.year}-12-31'
+
+FUND_UNIVERSE_DATE = _semi_annual_snapshot(LATEST_REPORT_DATE)
 
 OUT_DIR = Path(__file__).parent / 'data'
 
