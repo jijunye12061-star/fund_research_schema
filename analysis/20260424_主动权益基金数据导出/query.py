@@ -1,7 +1,7 @@
 """
 主动权益基金数据导出
 输出列：
-  基金基础数据.xlsx    : c_fd_code | c_short_name | c_estabdate | 板块分类
+  基金基础数据.xlsx    : 基金代码 | 基金分类 | 基金名称 | 基金成立时间 | 现任基金经理
   个股持仓情况.xlsx    : 基金代码 | 报告期 | 股票代码 | 股票占净值比例
   行业持仓数据.xlsx    : 基金代码 | 报告期 | 股票占净值比例 | [行业列...]
   基金净值数据_YYYY.xlsx : fundcode | tradedate | nav_adjusted（每月一个sheet）
@@ -59,7 +59,7 @@ _ALL_HK_IND = [v['name'] for v in HK_PREFIX_THEME_MAPPING.values()]
 
 def _fetch_fund_list(doris: DorisConnector) -> pd.DataFrame:
     sql = """
-    SELECT a.c_fd_code, a.c_short_name, a.c_estabdate
+    SELECT a.c_fd_code, a.c_short_name, a.c_estabdate, a.c_manager_name
     FROM tytdata.tb_fd_basic_info a
     JOIN tytdata.tb_fd_category b
         ON a.c_fd_code = b.c_fd_code
@@ -231,7 +231,7 @@ def _classify_fund_theme(holdings: pd.DataFrame) -> pd.DataFrame:
                 category = '全市场'
         else:
             category = t1
-        results.append({'c_fd_code': fund_code, '板块分类': category})
+        results.append({'c_fd_code': fund_code, '基金分类': category})
 
     return pd.DataFrame(results)
 
@@ -373,7 +373,14 @@ def run():
 
     # ── 基金基础数据（合并分类）──
     fund_out = fund_df.merge(category_df, on='c_fd_code', how='left')
-    fund_out['c_estabdate'] = pd.to_datetime(fund_out['c_estabdate']).dt.strftime('%Y%m%d')
+    fund_out['c_estabdate'] = pd.to_datetime(fund_out['c_estabdate']).dt.strftime('%Y/%m/%d')
+    fund_out = fund_out.rename(columns={
+        'c_fd_code':      '基金代码',
+        'c_short_name':   '基金名称',
+        'c_estabdate':    '基金成立时间',
+        'c_manager_name': '现任基金经理',
+    })
+    fund_out = fund_out[['基金代码', '基金分类', '基金名称', '基金成立时间', '现任基金经理']]
 
     # ── 写出 ──
     fund_out.to_excel(OUT_DIR / '基金基础数据.xlsx', index=False)
