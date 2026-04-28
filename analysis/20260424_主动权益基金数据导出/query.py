@@ -2,7 +2,7 @@
 主动权益基金数据导出
 输出列：
   基金基础数据.xlsx    : 基金代码 | 基金分类 | 基金名称 | 基金成立时间 | 现任基金经理
-  个股持仓情况.xlsx    : 基金代码 | 报告期 | 股票代码 | 股票占净值比例
+  个股持仓情况.xlsx    : 基金代码 | 报告期 | 股票代码 | 股票名称 | 股票占净值比例
   行业持仓数据.xlsx    : 基金代码 | 报告期 | 股票占净值比例 | [行业列...]
   基金净值数据_YYYY.xlsx : fundcode | tradedate | nav_adjusted（每月一个sheet）
 """
@@ -255,12 +255,20 @@ def _fetch_top10_holdings(doris: DorisConnector,
                           fund_codes: list,
                           all_dates: list) -> pd.DataFrame:
     sql = """
-    SELECT c_fd_code, c_report_date, c_stk_code, c_nav_ratio
-    FROM tytdata.tb_fd_portfolio_stk
-    WHERE c_fd_code IN (:code_list)
-      AND c_report_date = :report_date
-      AND c_style IN ('01', '03', '05', '06')
-    ORDER BY c_fd_code, c_nav_ratio DESC
+    SELECT p.c_fd_code,
+           p.c_report_date,
+           p.c_stk_code,
+           COALESCE(a.c_stk_name, hk.c_stk_name) AS c_stk_name,
+           p.c_nav_ratio
+    FROM tytdata.tb_fd_portfolio_stk p
+    LEFT JOIN tytdata.tb_stk_basic_info a
+           ON p.c_stk_code = a.c_stk_code
+    LEFT JOIN tytdata.tb_stk_basic_info_hk hk
+           ON p.c_stk_code = hk.c_stk_code
+    WHERE p.c_fd_code IN (:code_list)
+      AND p.c_report_date = :report_date
+      AND p.c_style IN ('01', '03', '05', '06')
+    ORDER BY p.c_fd_code, p.c_nav_ratio DESC
     """
     results = []
     for rd in all_dates:
@@ -276,11 +284,13 @@ def _fetch_top10_holdings(doris: DorisConnector,
         'c_fd_code':     '基金代码',
         'c_report_date': '报告期',
         'c_stk_code':    '股票代码',
+        'c_stk_name':    '股票名称',
         'c_nav_ratio':   '股票占净值比例',
     })
     df['报告期']   = pd.to_datetime(df['报告期']).dt.strftime('%Y%m%d')
     df['基金代码'] = df['基金代码'] + '.OF'
     df['股票代码'] = df['股票代码'].apply(_add_exchange_suffix)
+    df = df[['基金代码', '报告期', '股票代码', '股票名称', '股票占净值比例']]
     return df
 
 
@@ -381,6 +391,7 @@ def run():
         'c_manager_name': '现任基金经理',
     })
     fund_out = fund_out[['基金代码', '基金分类', '基金名称', '基金成立时间', '现任基金经理']]
+    fund_out['基金代码'] = fund_out['基金代码'] + '.OF'
 
     # ── 写出 ──
     fund_out.to_excel(OUT_DIR / '基金基础数据.xlsx', index=False)
