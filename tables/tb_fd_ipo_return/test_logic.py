@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from insert import parse_lock_ratio, determine_board, determine_regime
+from _logic import parse_lock_ratio, determine_board, determine_regime
 
 
 def test_parse_lock_ratio():
