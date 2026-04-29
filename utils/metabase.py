@@ -6,6 +6,8 @@ Metabase API 查询封装
   MetabaseConnector.DB_DORIS  = 43  (Doris 测试库，默认)
   MetabaseConnector.DB_ORACLE = 39  (Oracle 投研通)
 
+分页：Doris 用 LIMIT/OFFSET，Oracle 11g 用 ROWNUM 包装（自动剔除 MB_RN_ 辅助列）。
+
 认证：读环境变量 METABASE_API_KEY
 """
 import os
@@ -97,11 +99,23 @@ class MetabaseConnector:
         pass
 
     def _fetch_page(self, sql: str, params: dict, offset: int) -> pd.DataFrame:
-        """执行单页查询，在原 SQL 外层包 LIMIT/OFFSET"""
-        paged_sql = f'SELECT * FROM ({sql}) _t LIMIT {_PAGE_SIZE} OFFSET {offset}'
+        """执行单页查询，在原 SQL 外层包分页语法（按 db_id 区分方言）"""
+        if self.db_id == self.DB_ORACLE:
+            # Oracle 11g 不支持 OFFSET/FETCH（12c+ 才有），用 ROWNUM 分页
+            paged_sql = (
+                f'SELECT * FROM ('
+                f'SELECT t_.*, ROWNUM MB_RN_ FROM ({sql}) t_ '
+                f'WHERE ROWNUM <= {offset + _PAGE_SIZE}'
+                f') WHERE MB_RN_ > {offset}'
+            )
+        else:
+            paged_sql = f'SELECT * FROM ({sql}) _t LIMIT {_PAGE_SIZE} OFFSET {offset}'
         payload = _build_payload(self.db_id, paged_sql, params)
         resp = requests.post(_API_URL, json=payload, headers=self._headers, timeout=60)
-        return _parse_response(resp)
+        df = _parse_response(resp)
+        if self.db_id == self.DB_ORACLE:
+            df = df.drop(columns=[c for c in df.columns if c.upper() == 'MB_RN_'])
+        return df
 
     @_timer
     def query(self, sql: str, **params) -> pd.DataFrame:

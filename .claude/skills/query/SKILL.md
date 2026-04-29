@@ -55,8 +55,8 @@ description: >
    # 在 bash 里执行
    python -c "
    from utils.metabase import MetabaseConnector
-   with MetabaseConnector() as mb:           # DB_ORACLE=39 切换 Oracle
-       df = mb.query('SELECT * FROM tytdata.tb_xxx LIMIT 10')
+   with MetabaseConnector() as mb:           # 默认 Doris；切 Oracle 用 MetabaseConnector(MetabaseConnector.DB_ORACLE)
+       df = mb.query('SELECT * FROM tytdata.tb_xxx LIMIT 10')   # Oracle 抽样改用 WHERE ROWNUM <= 10
        print(df.to_string())
    "
    ```
