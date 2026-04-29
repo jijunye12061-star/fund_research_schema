@@ -295,7 +295,8 @@ def _calc_net_asset_estimate(
     pairs = df[['c_init_code', 'c_sell_date']].drop_duplicates()
     grid = pairs.merge(sub_shares, on='c_init_code')
     grid['c_sell_date'] = pd.to_datetime(grid['c_sell_date'])
-    grid = grid.sort_values(['c_fd_code', 'c_sell_date']).reset_index(drop=True)
+    # merge_asof 要求按 on 列(c_sell_date)全局排序，by 列不参与排序
+    grid = grid.sort_values('c_sell_date').reset_index(drop=True)
 
     # merge_asof: 前向匹配 prev_q
     na_prev = net_assets.copy()
@@ -303,7 +304,7 @@ def _calc_net_asset_estimate(
     na_prev = na_prev.rename(
         columns={'c_report_date': 'c_sell_date', 'c_net_asset': 'prev_nav'}
     )
-    na_prev = na_prev.sort_values(['c_fd_code', 'c_sell_date'])
+    na_prev = na_prev.sort_values('c_sell_date')
 
     prev = pd.merge_asof(
         grid, na_prev[['c_fd_code', 'c_sell_date', 'prev_nav', 'prev_report_date']],
@@ -314,7 +315,7 @@ def _calc_net_asset_estimate(
     na_next = net_assets.rename(
         columns={'c_report_date': 'c_sell_date', 'c_net_asset': 'next_nav'}
     )
-    na_next = na_next.sort_values(['c_fd_code', 'c_sell_date'])
+    na_next = na_next.sort_values('c_sell_date')
 
     next_df = pd.merge_asof(
         grid, na_next[['c_fd_code', 'c_sell_date', 'next_nav']],
