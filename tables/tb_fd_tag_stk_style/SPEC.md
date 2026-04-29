@@ -2,7 +2,7 @@
 
 ## 基本信息
 
-**一句话定位：** 描述股票型/混合型基金在市值、价值-成长、动量、盈利、质量五个量化维度上的得分与标签，适合回答"找大盘价值基金"、"哪些基金动量风格最强"等问题。
+**一句话定位：** 描述股票型/混合型基金在市值、价值-成长、动量、盈利、质量、股息、稳定性七个量化维度上的得分与标签，适合回答"找大盘价值基金"、"哪些基金动量风格最强"、"固收加里高股息风格基金"等问题。
 
 | 项目 | 内容 |
 |------|------|
@@ -31,6 +31,10 @@
 | c_profit_tag | VARCHAR(10) | 盈利标签，枚举见下方 |
 | c_quality_score | DECIMAL(10,4) | 持仓加权 QUALITY z-score，近4期半年报均值 |
 | c_quality_tag | VARCHAR(10) | 质量标签，枚举见下方 |
+| c_dividend_score | DECIMAL(10,4) | 持仓加权 DIVIDENDYIELD z-score（Barra 风险因子），近4期半年报均值 |
+| c_dividend_tag | VARCHAR(10) | 股息标签，枚举见下方 |
+| c_stability_score | DECIMAL(10,4) | 风格稳定性得分（0-100，越小越稳定），跨基金分位均值 |
+| c_stability_tag | VARCHAR(10) | 风格稳定性标签，枚举见下方 |
 | c_updatetime | DATETIME(6) | 更新时间 |
 
 ## 标签规则
@@ -58,17 +62,35 @@
 | `GARP` | c_value_score > 0 且 c_growth_score > 0，不满足上两条 |
 | `均衡` | 其余 |
 
-### 动量/盈利/质量标签
+### 动量/盈利/质量/股息标签
 
-基于**跨基金相对分位**（仅非港股基金），阈值为当期所有非港股基金得分的70%/30%分位。
+基于**同 `c_type1_code` 分类内相对分位**（仅非港股基金），阈值为当期同一一级分类下所有非港股基金得分的70%/30%分位。
 
 | 取值 | 条件 |
 |------|------|
-| `高动量` / `高盈利` / `高质量` | 得分 ≥ 70%分位 |
-| `中动量` / `中盈利` / `中质量` | 30%分位 < 得分 < 70%分位 |
-| `低动量` / `低盈利` / `低质量` | 得分 ≤ 30%分位 |
+| `高动量` / `高盈利` / `高质量` / `高股息` | 得分 ≥ 70%分位 |
+| `中动量` / `中盈利` / `中质量` / `中股息` | 30%分位 < 得分 < 70%分位 |
+| `低动量` / `低盈利` / `低质量` / `低股息` | 得分 ≤ 30%分位 |
 
-> 港股基金不参与打标签（动量/盈利/质量/红利字段为 NULL）。原因：风险模型不含港股标的因子，仅用A股持仓计算得分不具可比性。
+> 港股基金不参与打标签（动量/盈利/质量/股息字段为 NULL）。原因：风险模型不含港股标的因子，仅用A股持仓计算得分不具可比性。
+
+### 风格稳定性标签（c_stability_tag）
+
+衡量基金近4期在市值与价值-成长两个维度上的波动程度。
+
+**计算流程：**
+
+1. 对每只基金，分别计算 `c_size_score` 和 `vg_spread = c_value_score - c_growth_score` 在 4 期半年报截面上的标准差（`size_std` / `vg_std`）
+2. 在所有非港股基金（且参与期数 ≥ 2）中分别计算 `size_std` / `vg_std` 的百分位（pct rank × 100）
+3. `c_stability_score` = (size_pct + vg_pct) / 2，**得分越小代表越稳定**
+
+| 取值 | 条件 |
+|------|------|
+| `稳定` | c_stability_score < 30 |
+| `适中` | 30 ≤ c_stability_score ≤ 70 |
+| `漂移` | c_stability_score > 70 |
+
+> 港股基金及参与期数 < 2 的新基金返回 NULL。
 
 ## 常用关联表
 
@@ -82,7 +104,7 @@
 
 ```sql
 -- 查询最新期大盘价值基金
-SELECT s.c_fd_code, b.c_fd_name, s.c_size_score, s.c_value_score
+SELECT s.c_fd_code, b.c_short_name, s.c_size_score, s.c_value_score
 FROM tytdata.tb_fd_tag_stk_style s
 JOIN tytdata.tb_fd_basic_info b ON s.c_fd_code = b.c_fd_code
 WHERE s.c_report_date = '2025-06-30'
@@ -105,7 +127,7 @@ WHERE c_fd_code = '000001'
 ORDER BY c_report_date;
 
 -- 找高质量小盘成长基金
-SELECT s.c_fd_code, b.c_fd_name,
+SELECT s.c_fd_code, b.c_short_name,
        s.c_size_score, s.c_growth_score, s.c_quality_score
 FROM tytdata.tb_fd_tag_stk_style s
 JOIN tytdata.tb_fd_basic_info b ON s.c_fd_code = b.c_fd_code
@@ -114,4 +136,17 @@ WHERE s.c_report_date = '2025-06-30'
   AND s.c_vg_tag = '成长'
   AND s.c_quality_tag = '高质量'
 ORDER BY s.c_quality_score DESC;
+
+-- 固收加里高股息风格基金（按 c_dividend_score 降序）
+SELECT s.c_fd_code, b.c_short_name, cat.c_type2_name,
+       s.c_dividend_score, s.c_stability_tag
+FROM tytdata.tb_fd_tag_stk_style s
+JOIN tytdata.tb_fd_category cat
+  ON cat.c_fd_code = s.c_fd_code AND cat.c_report_date = s.c_report_date
+JOIN tytdata.tb_fd_basic_info b ON b.c_fd_code = s.c_fd_code
+WHERE s.c_report_date = '2025-12-31'
+  AND cat.c_type1_code = '002'
+  AND (b.c_init_code = b.c_fd_code OR b.c_init_code IS NULL)
+  AND s.c_dividend_tag = '高股息'
+ORDER BY s.c_dividend_score DESC;
 ```
