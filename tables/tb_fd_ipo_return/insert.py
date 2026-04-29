@@ -202,3 +202,46 @@ def _assign_sell_dates(
     df['c_sell_date'] = pd.to_datetime(df['c_sell_date'])
     return df
 
+
+def _query_sell_vwap(
+    df: pd.DataFrame, doris: DorisConnector,
+) -> pd.DataFrame:
+    """按卖出日分组批量查询 VWAP = c_amount / c_volume"""
+    results = []
+    sell_groups = df.groupby('c_sell_date')['c_stk_code'].apply(
+        lambda s: s.unique().tolist()
+    )
+    for sell_date, stk_codes in sell_groups.items():
+        vwap = doris.query_batch(
+            """
+            SELECT c_stk_code,
+                   c_amount / c_volume AS c_sell_vwap
+            FROM tytdata.tb_stk_quote_daily
+            WHERE c_stk_code IN (:code_list)
+              AND c_trade_date = :trade_date
+              AND c_volume > 0
+            """,
+            code_list=stk_codes,
+            trade_date=str(sell_date)[:10],
+        )
+        results.append(vwap)
+
+    if not results:
+        df['c_sell_vwap'] = np.nan
+        return df
+
+    vwap_df = pd.concat(results, ignore_index=True)
+    df = df.merge(vwap_df, on='c_stk_code', how='left')
+    return df
+
+
+def _calc_pnl(df: pd.DataFrame) -> pd.DataFrame:
+    """计算确认涨幅和无锁定部分浮盈"""
+    df['c_confirmed_return'] = (
+        (df['c_sell_vwap'] - df['c_issue_price']) / df['c_issue_price']
+    )
+    df['c_pnl_unlocked'] = (
+        df['c_alloc_qty_unlocked'] * (df['c_sell_vwap'] - df['c_issue_price'])
+    )
+    return df
+
