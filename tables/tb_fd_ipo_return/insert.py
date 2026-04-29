@@ -164,3 +164,41 @@ def _enrich_and_apply_rules(
     df.drop(columns=['lock_text'], inplace=True)
     return df
 
+
+def _assign_sell_dates(
+    df: pd.DataFrame, doris: DorisConnector,
+) -> pd.DataFrame:
+    """注册制 → 卖出日=上市日；核准制 → 卖出日=首次开板日"""
+    reg_mask = df['c_regime'] == 'registration'
+    df.loc[reg_mask, 'c_sell_date'] = df.loc[reg_mask, 'c_list_date']
+
+    appr_mask = df['c_regime'] == 'approval'
+    if not appr_mask.any():
+        return df
+
+    appr_codes = df.loc[appr_mask, 'c_stk_code'].unique().tolist()
+    logger.info(f"  核准制 IPO {len(appr_codes)} 只，查询首次开板日")
+
+    first_open = doris.query_batch(
+        """
+        SELECT c_stk_code,
+               MIN(c_trade_date) AS first_open_date
+        FROM tytdata.tb_stk_quote_daily
+        WHERE c_stk_code IN (:code_list)
+          AND c_is_limit_up = '否'
+        GROUP BY c_stk_code
+        """,
+        code_list=appr_codes,
+    )
+    open_map = dict(zip(first_open['c_stk_code'], first_open['first_open_date']))
+    df.loc[appr_mask, 'c_sell_date'] = (
+        df.loc[appr_mask, 'c_stk_code'].map(open_map)
+    )
+
+    n_missing = df['c_sell_date'].isna().sum()
+    if n_missing:
+        logger.warning(f"  {n_missing} 行卖出日未确定(尚未开板)，将跳过")
+
+    df['c_sell_date'] = pd.to_datetime(df['c_sell_date'])
+    return df
+
