@@ -89,8 +89,8 @@ def _query_ipo_placement(
       AND i.FINATYPE = '001'
       AND p.PLACEOBJECTTYPE = '网下机构投资者'
       AND p.PLACING_OBJECT_CODE IS NOT NULL
-      AND i.NOTICEDATE >= :start_date
-      AND i.NOTICEDATE <= :end_date
+      AND i.NOTICEDATE >= TO_DATE(:start_date, 'YYYY-MM-DD')
+      AND i.NOTICEDATE <= TO_DATE(:end_date, 'YYYY-MM-DD')
     GROUP BY i.FINANCECODE, i.ISSUEPRICE, i.SECURITY_INNER_CODE,
              p.PLACING_OBJECT_CODE
     """
