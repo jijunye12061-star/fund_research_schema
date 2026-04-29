@@ -58,3 +58,40 @@ OUTPUT_COLS = [
 ]
 
 DATA_START = '2019-01-01'
+
+# ==================== Query Functions ====================
+
+
+def _query_ipo_placement(
+    oracle: OracleConnector,
+    start_date: str,
+    end_date: str = '2099-12-31',
+) -> pd.DataFrame:
+    """从 Oracle 拉取 IPO 配售明细（按 NOTICEDATE 过滤）
+
+    Returns:
+        DataFrame with columns:
+        c_finance_code, c_issue_price, c_stk_inner_code,
+        c_fd_code, c_alloc_qty_total, lock_text
+    """
+    sql = """
+    SELECT
+        i.FINANCECODE            AS c_finance_code,
+        i.ISSUEPRICE             AS c_issue_price,
+        i.SECURITY_INNER_CODE    AS c_stk_inner_code,
+        p.PLACING_OBJECT_CODE    AS c_fd_code,
+        SUM(p.SHAREPLACE)        AS c_alloc_qty_total,
+        MAX(p.LOCKPERIOD)        AS lock_text
+    FROM TYTFUND.CPI_ISSUEBASICINFO i
+    JOIN TYTFUND.CPI_PLACERESULT p
+      ON p.FINANCECODE = i.FINANCECODE
+    WHERE i.SECURITYTYPECODE = '058001001'
+      AND i.FINATYPE = '001'
+      AND p.PLACEOBJECTTYPE = '网下机构投资者'
+      AND p.PLACING_OBJECT_CODE IS NOT NULL
+      AND i.NOTICEDATE >= :start_date
+      AND i.NOTICEDATE <= :end_date
+    GROUP BY i.FINANCECODE, i.ISSUEPRICE, i.SECURITY_INNER_CODE,
+             p.PLACING_OBJECT_CODE
+    """
+    return oracle.query(sql, start_date=start_date, end_date=end_date)
