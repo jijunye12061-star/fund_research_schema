@@ -345,3 +345,120 @@ def _calc_net_asset_estimate(
     df = df.merge(est, on=['c_init_code', 'c_sell_date'], how='left')
     return df
 
+
+# ==================== Orchestration ====================
+
+
+def _process_placements(
+    oracle: OracleConnector,
+    doris: DorisConnector,
+    start_date: str,
+    end_date: str = '2099-12-31',
+) -> pd.DataFrame:
+    """核心流水线：拉取 → 清洗 → 计算 → 返回 DataFrame"""
+    with _step("Oracle: 拉取 IPO 配售明细"):
+        raw = _query_ipo_placement(oracle, start_date, end_date)
+    logger.info(f"  Oracle 返回 {len(raw)} 行")
+    if raw.empty:
+        return raw
+
+    df = _enrich_and_apply_rules(raw, doris)
+    if df.empty:
+        logger.warning("  enrichment 后无数据")
+        return df
+
+    with _step("确定卖出日"):
+        df = _assign_sell_dates(df, doris)
+    df = df.dropna(subset=['c_sell_date'])
+    if df.empty:
+        logger.warning("  无有效卖出日")
+        return df
+
+    with _step("查询卖出日 VWAP"):
+        df = _query_sell_vwap(df, doris)
+    n_no_vwap = df['c_sell_vwap'].isna().sum()
+    if n_no_vwap:
+        logger.warning(f"  {n_no_vwap} 行 VWAP 缺失(停牌/退市)，跳过")
+    df = df.dropna(subset=['c_sell_vwap'])
+
+    with _step("计算浮盈"):
+        df = _calc_pnl(df)
+
+    with _step("计算规模分母"):
+        df = _calc_net_asset_estimate(df, doris)
+
+    logger.info(f"  最终 {len(df)} 行待写入")
+    return df
+
+
+def run_init():
+    """全量初始化：拉取 2019+ 全部 IPO 配售数据"""
+    logger.info("========== 全量初始化模式 ==========")
+    with OracleConnector(ENV) as oracle, DorisConnector(ENV) as doris:
+        # NOTICEDATE 提前半年以覆盖 2019-01-01 上市的 IPO
+        df = _process_placements(oracle, doris, start_date='2018-06-01')
+        if df.empty:
+            logger.warning("无数据写入")
+            return
+        logger.info(f"写入 {len(df)} 行")
+        doris.insert('tb_fd_ipo_return', df[OUTPUT_COLS])
+    logger.info("========== 全量初始化完成 ==========")
+
+
+def _parse_season(season: str) -> tuple[str, str]:
+    """解析 --season 参数，返回 (prev_quarter_end, quarter_end)"""
+    m = re.match(r'(\d{4})-Q([1-4])', season)
+    if not m:
+        raise ValueError(f"无效格式: {season}，应为 YYYY-Q1/Q2/Q3/Q4")
+    year, q = int(m.group(1)), int(m.group(2))
+    ends = {1: '03-31', 2: '06-30', 3: '09-30', 4: '12-31'}
+    quarter_end = f"{year}-{ends[q]}"
+    prev_ends = {
+        1: f"{year - 1}-12-31", 2: f"{year}-03-31",
+        3: f"{year}-06-30", 4: f"{year}-09-30",
+    }
+    return prev_ends[q], quarter_end
+
+
+def run_season(season: str):
+    """增量跑批：处理指定季度新上市的 IPO"""
+    prev_end, quarter_end = _parse_season(season)
+    logger.info(f"========== 增量模式: {season} ({prev_end} ~ {quarter_end}] ==========")
+
+    # Oracle NOTICEDATE 窗口：提前 3 个月以覆盖本季度上市的 IPO
+    notice_start = str(pd.Timestamp(prev_end) - pd.DateOffset(months=3))[:10]
+
+    with OracleConnector(ENV) as oracle, DorisConnector(ENV) as doris:
+        df = _process_placements(oracle, doris, notice_start, quarter_end)
+        if df.empty:
+            logger.warning("无数据")
+            return
+
+        # 过滤：仅保留 c_list_date 在本季度窗口内的 IPO
+        df = df[
+            (df['c_list_date'] > prev_end) & (df['c_list_date'] <= quarter_end)
+        ]
+        if df.empty:
+            logger.info("本季度无新 IPO")
+            return
+
+        logger.info(f"写入 {len(df)} 行 (UNIQUE KEY 覆盖)")
+        doris.insert('tb_fd_ipo_return', df[OUTPUT_COLS])
+    logger.info(f"========== 增量完成: {season} ==========")
+
+
+# ==================== CLI ====================
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='公募打新收益归因 ETL')
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('--init', action='store_true',
+                       help='全量初始化(2019+)')
+    group.add_argument('--season', type=str,
+                       help='增量跑批, 格式: YYYY-Q1/Q2/Q3/Q4')
+    args = parser.parse_args()
+
+    if args.init:
+        run_init()
+    else:
+        run_season(args.season)
