@@ -95,3 +95,72 @@ def _query_ipo_placement(
              p.PLACING_OBJECT_CODE
     """
     return oracle.query(sql, start_date=start_date, end_date=end_date)
+
+
+def _query_stk_info(
+    doris: DorisConnector, inner_codes: list[int],
+) -> pd.DataFrame:
+    """通过内码关联获取股票代码和上市日"""
+    sql = """
+    SELECT c_inner_code AS c_stk_inner_code,
+           c_stk_code,
+           c_list_date
+    FROM tytdata.tb_stk_basic_info
+    WHERE c_inner_code IN (:code_list)
+    """
+    return doris.query_batch(sql, code_list=inner_codes)
+
+
+def _query_init_code_map(
+    doris: DorisConnector, fd_codes: list[str],
+) -> pd.DataFrame:
+    """基金子份额 → 主代码映射（同时过滤掉非公募基金）"""
+    sql = """
+    SELECT c_fd_code, c_init_code
+    FROM tytdata.tb_fd_basic_info
+    WHERE c_fd_code IN (:code_list)
+    """
+    return doris.query_batch(sql, code_list=fd_codes)
+
+
+# ==================== Processing Functions ====================
+
+
+def _enrich_and_apply_rules(
+    raw: pd.DataFrame,
+    doris: DorisConnector,
+) -> pd.DataFrame:
+    """关联股票信息 → 过滤公募 → 判定板块/制度/锁定比例"""
+    inner_codes = raw['c_stk_inner_code'].unique().tolist()
+
+    with _step("Doris: 关联股票信息"):
+        stk_info = _query_stk_info(doris, inner_codes)
+    df = raw.merge(stk_info, on='c_stk_inner_code', how='inner')
+
+    # 过滤: 只保留 2019+ 上市的 IPO
+    df['c_list_date'] = pd.to_datetime(df['c_list_date'])
+    df = df[df['c_list_date'] >= DATA_START].copy()
+    if df.empty:
+        return df
+
+    with _step("Doris: 匹配主代码(过滤非公募)"):
+        init_map = _query_init_code_map(doris, df['c_fd_code'].unique().tolist())
+    df = df.merge(init_map, on='c_fd_code', how='inner')
+    logger.info(f"  公募基金命中 {len(df)} 行 / 原始 {len(raw)} 行")
+
+    with _step("判定板块/制度/锁定比例"):
+        df['c_stk_code'] = df['c_stk_code'].astype(str)
+        df['c_board'] = df['c_stk_code'].apply(determine_board)
+        list_date_str = df['c_list_date'].dt.strftime('%Y-%m-%d')
+        df['c_regime'] = [
+            determine_regime(b, d)
+            for b, d in zip(df['c_board'], list_date_str)
+        ]
+        df['c_lock_ratio'] = df['lock_text'].apply(parse_lock_ratio)
+        df['c_alloc_qty_unlocked'] = (
+            df['c_alloc_qty_total'] * (1 - df['c_lock_ratio'])
+        )
+
+    df.drop(columns=['lock_text'], inplace=True)
+    return df
+
