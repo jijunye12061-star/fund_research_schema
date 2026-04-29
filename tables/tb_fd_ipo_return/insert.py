@@ -269,7 +269,7 @@ def _query_net_asset_data(
         """
         SELECT c_fd_code,
                c_report_date,
-               MAX(c_net_asset) AS c_net_asset
+               MAX(c_fund_nav_total) AS c_net_asset
         FROM tytdata.tb_fd_asset_allocation
         WHERE c_fd_code IN (:code_list)
         GROUP BY c_fd_code, c_report_date

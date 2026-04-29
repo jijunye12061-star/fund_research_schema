@@ -3,7 +3,7 @@ CREATE TABLE tytdata.tb_fd_ipo_return
     c_fd_code              VARCHAR(16)     COMMENT '子份额代码(PLACING_OBJECT_CODE)',
     c_stk_code             VARCHAR(16)     COMMENT '新股6位代码',
     c_init_code            VARCHAR(16)     COMMENT '主代码(冗余,便于聚合)',
-    c_stk_inner_code       BIGINT          COMMENT '股票内码(CPI关联键)',
+    c_stk_inner_code       VARCHAR(20)     COMMENT '股票内码(CPI关联键,10位数字字符串)',
     c_finance_code         VARCHAR(32)     COMMENT 'IPO融资内码(FINANCECODE)',
     c_board                VARCHAR(16)     COMMENT '板块: star/gem/main_sh/main_sz/bse',
     c_regime               VARCHAR(16)     COMMENT '发行制度: registration/approval',

@@ -14,7 +14,7 @@
 | `c_fd_code` | VARCHAR(16) | 子份额代码（配售对象代码） |
 | `c_init_code` | VARCHAR(16) | 主代码（A份额，冗余便于聚合） |
 | `c_stk_code` | VARCHAR(16) | 新股 6 位代码 |
-| `c_stk_inner_code` | BIGINT | 股票内码（CPI 关联键） |
+| `c_stk_inner_code` | VARCHAR(20) | 股票内码（CPI 关联键，10 位数字字符串） |
 | `c_finance_code` | VARCHAR(32) | IPO 融资内码 |
 | `c_board` | VARCHAR(16) | 板块：star / gem / main_sh / main_sz / bse |
 | `c_regime` | VARCHAR(16) | 发行制度：registration / approval |
