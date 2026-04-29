@@ -245,3 +245,103 @@ def _calc_pnl(df: pd.DataFrame) -> pd.DataFrame:
     )
     return df
 
+
+def _query_net_asset_data(
+    doris: DorisConnector, init_codes: list[str],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """查询主代码下所有子份额及其季报净资产
+
+    Returns:
+        sub_shares: DataFrame[c_fd_code, c_init_code]
+        net_assets: DataFrame[c_fd_code, c_report_date, c_net_asset]（按日期升序）
+    """
+    sub_shares = doris.query_batch(
+        """
+        SELECT c_fd_code, c_init_code
+        FROM tytdata.tb_fd_basic_info
+        WHERE c_init_code IN (:code_list)
+        """,
+        code_list=init_codes,
+    )
+
+    all_fd_codes = sub_shares['c_fd_code'].unique().tolist()
+    net_assets = doris.query_batch(
+        """
+        SELECT c_fd_code,
+               c_report_date,
+               MAX(c_net_asset) AS c_net_asset
+        FROM tytdata.tb_fd_asset_allocation
+        WHERE c_fd_code IN (:code_list)
+        GROUP BY c_fd_code, c_report_date
+        """,
+        code_list=all_fd_codes,
+    )
+    net_assets['c_report_date'] = pd.to_datetime(net_assets['c_report_date'])
+    net_assets = net_assets.sort_values(['c_fd_code', 'c_report_date'])
+    return sub_shares, net_assets
+
+
+def _calc_net_asset_estimate(
+    df: pd.DataFrame, doris: DorisConnector,
+) -> pd.DataFrame:
+    """计算规模分母（主代码 × 卖出日层面，子份额加总）
+
+    使用 pd.merge_asof 向量化匹配前后两期季报净资产。
+    """
+    init_codes = df['c_init_code'].unique().tolist()
+    sub_shares, net_assets = _query_net_asset_data(doris, init_codes)
+
+    # (init_code, sell_date) 去重 → 展开到子份额粒度
+    pairs = df[['c_init_code', 'c_sell_date']].drop_duplicates()
+    grid = pairs.merge(sub_shares, on='c_init_code')
+    grid['c_sell_date'] = pd.to_datetime(grid['c_sell_date'])
+    grid = grid.sort_values(['c_fd_code', 'c_sell_date']).reset_index(drop=True)
+
+    # merge_asof: 前向匹配 prev_q
+    na_prev = net_assets.copy()
+    na_prev['prev_report_date'] = na_prev['c_report_date']
+    na_prev = na_prev.rename(
+        columns={'c_report_date': 'c_sell_date', 'c_net_asset': 'prev_nav'}
+    )
+    na_prev = na_prev.sort_values(['c_fd_code', 'c_sell_date'])
+
+    prev = pd.merge_asof(
+        grid, na_prev[['c_fd_code', 'c_sell_date', 'prev_nav', 'prev_report_date']],
+        on='c_sell_date', by='c_fd_code', direction='backward',
+    )
+
+    # merge_asof: 后向匹配 next_q
+    na_next = net_assets.rename(
+        columns={'c_report_date': 'c_sell_date', 'c_net_asset': 'next_nav'}
+    )
+    na_next = na_next.sort_values(['c_fd_code', 'c_sell_date'])
+
+    next_df = pd.merge_asof(
+        grid, na_next[['c_fd_code', 'c_sell_date', 'next_nav']],
+        on='c_sell_date', by='c_fd_code', direction='forward',
+    )
+    prev['next_nav'] = next_df['next_nav'].values
+
+    # 计算单个子份额估算值
+    has_both = prev['prev_nav'].notna() & prev['next_nav'].notna()
+    prev['fd_estimate'] = np.where(
+        has_both,
+        (prev['prev_nav'] + prev['next_nav']) / 2,
+        prev['prev_nav'],
+    )
+    # 跳过无 prev_q 的子份额（基金成立未满一季度）
+    prev = prev.dropna(subset=['prev_nav'])
+
+    # 聚合到 (init_code, sell_date) 层面
+    est = prev.groupby(['c_init_code', 'c_sell_date']).agg(
+        c_net_asset_estimate=('fd_estimate', 'sum'),
+        c_net_asset_report_date=('prev_report_date', 'first'),
+        c_size_method=('next_nav', lambda x: (
+            'quarterly_avg' if x.notna().all() else 'quarterly_ffill'
+        )),
+    ).reset_index()
+
+    df['c_sell_date'] = pd.to_datetime(df['c_sell_date'])
+    df = df.merge(est, on=['c_init_code', 'c_sell_date'], how='left')
+    return df
+
