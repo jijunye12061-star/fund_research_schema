@@ -76,12 +76,12 @@ def _query_ipo_placement(
     """
     sql = """
     SELECT
-        i.FINANCECODE            AS c_finance_code,
-        i.ISSUEPRICE             AS c_issue_price,
-        i.SECURITY_INNER_CODE    AS c_stk_inner_code,
-        p.PLACING_OBJECT_CODE    AS c_fd_code,
-        SUM(p.SHAREPLACE)        AS c_alloc_qty_total,
-        MAX(p.LOCKPERIOD)        AS lock_text
+        i.FINANCECODE            AS "c_finance_code",
+        i.ISSUEPRICE             AS "c_issue_price",
+        i.SECURITY_INNER_CODE    AS "c_stk_inner_code",
+        p.PLACING_OBJECT_CODE    AS "c_fd_code",
+        SUM(p.SHAREPLACE)        AS "c_alloc_qty_total",
+        MAX(p.LOCKPERIOD)        AS "lock_text"
     FROM TYTFUND.CPI_ISSUEBASICINFO i
     JOIN TYTFUND.CPI_PLACERESULT p
       ON p.FINANCECODE = i.FINANCECODE
