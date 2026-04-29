@@ -8,15 +8,49 @@ from _logic import parse_lock_ratio, determine_board, determine_regime
 
 
 def test_parse_lock_ratio():
+    # 空值
     assert parse_lock_ratio(None) == 0.0
     assert parse_lock_ratio('') == 0.0
+    # 无锁定描述
     assert parse_lock_ratio('普通网下推荐配售类') == 0.0
     assert parse_lock_ratio('普通网下追加配售类') == 0.0
-    assert parse_lock_ratio('10%的股份锁定6个月') == 0.10
-    assert parse_lock_ratio('30%的股份限售6个月') == 0.30
-    assert parse_lock_ratio('40%股份锁定') == 0.40
+    # 孤立月份文本（脏数据）
     assert parse_lock_ratio('6个月') == 0.0
-    assert parse_lock_ratio('70%的股份锁定12个月,30%的股份限售6个月') == 0.70
+    assert parse_lock_ratio('9个月') == 0.0
+    # "无流通限制及锁定安排" — 否定句, 应为 0
+    assert parse_lock_ratio('无流通限制及锁定安排') == 0.0
+    # Pattern A 主流: 90/10 锁定 → 应取 10%
+    assert parse_lock_ratio(
+        '即每个配售对象获配的股票中,90%的股份无限售期,'
+        '自本次发行股票在上交所上市交易之日起即可流通;'
+        '10%的股份限售期为6个月'
+    ) == 0.10
+    # Pattern B: 70/30 锁定 → 应取 30%
+    assert parse_lock_ratio(
+        '每个配售对象获配的股票中,70%的股份无锁定期,'
+        '自本次发行股票在深交所上市交易之日起即可流通;'
+        '30%的股份锁定期为6个月'
+    ) == 0.30
+    # Pattern C: 60/40 锁定 → 应取 40%
+    assert parse_lock_ratio(
+        '即每个配售对象获配的股票中,60%的股份无限售期,'
+        '40%的股份限售期为6个月'
+    ) == 0.40
+    # Pattern D 反向: 30/70 锁定 → 应取 70%（70% 限售）
+    assert parse_lock_ratio(
+        '即每个配售对象获配的股票中,30%的股份无限售期;'
+        '70%的股份限售期为6个月'
+    ) == 0.70
+    # Pattern E 短文本: "X%(向上取整计算)限售期限为..."
+    assert parse_lock_ratio(
+        '网下投资者应当承诺其获配股票数量的10%(向上取整计算)'
+        '限售期限为自发行人首次公开发行并上市之日起6个月'
+    ) == 0.10
+    # Pattern F: 65% 限售
+    assert parse_lock_ratio(
+        '承诺其获配股票数量的65%(向上取整计算)'
+        '限售期限为自发行人首次公开发行并上市之日起9个月'
+    ) == 0.65
 
 
 def test_determine_board():
